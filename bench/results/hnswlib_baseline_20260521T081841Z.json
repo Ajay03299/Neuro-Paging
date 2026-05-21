@@ -1,0 +1,96 @@
+{
+  "system": {
+    "platform": "macOS-15.7.3-arm64-arm-64bit",
+    "machine": "arm64",
+    "processor": "arm",
+    "python_version": "3.11.11",
+    "hnswlib_version": "unknown",
+    "numpy_version": "2.4.6",
+    "timestamp_utc": "2026-05-21T08:18:41.690827+00:00"
+  },
+  "config": {
+    "dim": 384,
+    "M": 16,
+    "ef_construction": 200,
+    "ef_search": 50,
+    "k": 5,
+    "num_queries": 1000,
+    "corpus_sizes": [
+      1000,
+      10000,
+      50000,
+      100000
+    ],
+    "seed": 42
+  },
+  "results": [
+    {
+      "corpus_size": 1000,
+      "insert": {
+        "total_seconds": 0.2222,
+        "throughput_vectors_per_sec": 4500.9
+      },
+      "query_latency_ms": {
+        "p50": 0.1561,
+        "p95": 0.1697,
+        "p99": 0.1914,
+        "mean": 0.1582,
+        "min": 0.1462,
+        "max": 0.4307
+      },
+      "index_size_bytes": 1684244,
+      "index_size_mb": 1.61
+    },
+    {
+      "corpus_size": 10000,
+      "insert": {
+        "total_seconds": 10.9119,
+        "throughput_vectors_per_sec": 916.4
+      },
+      "query_latency_ms": {
+        "p50": 0.2903,
+        "p95": 0.3556,
+        "p99": 0.4271,
+        "mean": 0.298,
+        "min": 0.2361,
+        "max": 0.5645
+      },
+      "index_size_bytes": 16849328,
+      "index_size_mb": 16.07
+    },
+    {
+      "corpus_size": 50000,
+      "insert": {
+        "total_seconds": 93.6751,
+        "throughput_vectors_per_sec": 533.8
+      },
+      "query_latency_ms": {
+        "p50": 0.4581,
+        "p95": 0.5806,
+        "p99": 0.6537,
+        "mean": 0.4676,
+        "min": 0.3485,
+        "max": 0.8198
+      },
+      "index_size_bytes": 84234152,
+      "index_size_mb": 80.33
+    },
+    {
+      "corpus_size": 100000,
+      "insert": {
+        "total_seconds": 218.3155,
+        "throughput_vectors_per_sec": 458.1
+      },
+      "query_latency_ms": {
+        "p50": 0.4785,
+        "p95": 0.6164,
+        "p99": 0.6782,
+        "mean": 0.4876,
+        "min": 0.3635,
+        "max": 0.7779
+      },
+      "index_size_bytes": 168465624,
+      "index_size_mb": 160.66
+    }
+  ]
+}
