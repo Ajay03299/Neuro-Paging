@@ -5,45 +5,27 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
-  workflow_dispatch:  # allow manual runs from the Actions tab
+  workflow_dispatch:
 
-# Cancel in-progress runs when a new commit is pushed to the same branch
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  # ──────────────────────────────────────────────────────────────────
-  # 1. Lint — fast feedback, runs first
-  # ──────────────────────────────────────────────────────────────────
   lint:
     name: Lint (ruff)
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v3
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
         with:
           version: "latest"
+      - run: uv python install 3.11
+      - run: uv tool install ruff
+      - run: ruff check src/ tests/
+      - run: ruff format --check src/ tests/
 
-      - name: Set up Python
-        run: uv python install 3.11
-
-      - name: Install ruff
-        run: uv tool install ruff
-
-      - name: Run ruff check
-        run: ruff check src/ tests/
-
-      - name: Run ruff format check
-        run: ruff format --check src/ tests/
-
-  # ──────────────────────────────────────────────────────────────────
-  # 2. Tests — pytest across Python versions
-  # ──────────────────────────────────────────────────────────────────
   test:
     name: Tests (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
@@ -53,67 +35,42 @@ jobs:
       matrix:
         python-version: ["3.11", "3.12"]
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v3
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
         with:
           version: "latest"
-          enable-cache: true
-
-      - name: Set up Python ${{ matrix.python-version }}
-        run: uv python install ${{ matrix.python-version }}
-
-      - name: Create venv & install
+      - run: uv python install ${{ matrix.python-version }}
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y build-essential
+      - name: Install dependencies
         run: |
           uv venv --python ${{ matrix.python-version }}
           uv pip install -e ".[dev,eval]"
-
-      - name: Run pytest
+      - name: Run tests
         run: |
           source .venv/bin/activate
-          pytest tests/ -v --tb=short --cov=src/neuro_paging --cov-report=term-missing
+          pytest tests/ -v --tb=short
 
-      - name: Upload coverage
-        if: matrix.python-version == '3.11'
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-report
-          path: .coverage
-          retention-days: 7
-
-  # ──────────────────────────────────────────────────────────────────
-  # 3. Secret scan — fail the build on accidentally committed secrets
-  # ──────────────────────────────────────────────────────────────────
   secret-scan:
     name: Secret scan (gitleaks)
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # gitleaks scans full history
-
-      - name: Run gitleaks
-        uses: gitleaks/gitleaks-action@v2
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2.3.2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # ──────────────────────────────────────────────────────────────────
-  # 4. License check — Apache-2.0 file must exist
-  # ──────────────────────────────────────────────────────────────────
   license-check:
     name: License sanity
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Verify LICENSE exists and is Apache-2.0
+      - uses: actions/checkout@v4
+      - name: Verify Apache-2.0
         run: |
-          test -f LICENSE || (echo "❌ LICENSE missing" && exit 1)
-          grep -q "Apache License" LICENSE || (echo "❌ Not Apache-2.0" && exit 1)
-          echo "✅ Apache-2.0 LICENSE present"
+          test -f LICENSE || (echo "LICENSE missing" && exit 1)
+          grep -q "Apache License" LICENSE || (echo "Not Apache-2.0" && exit 1)
+          echo "OK"
