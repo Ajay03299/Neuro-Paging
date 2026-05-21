@@ -1,0 +1,92 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# uv
+.uv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Testing & coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.mypy_cache/
+.ruff_cache/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# C++ build artifacts
+*.o
+*.a
+*.dylib
+*.dSYM/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+compile_commands.json
+npaged-core/build/
+
+# Model weights (use HF / git-lfs instead)
+*.gguf
+*.onnx
+*.safetensors
+*.bin
+models/
+
+# Data (kept out of git, generated/downloaded)
+data/raw/
+data/processed/
+*.parquet
+
+# Logs & local benchmark outputs
+logs/
+*.log
+notes/local/
+bench/results/local/
+
+# Secrets — any of these in a commit = hackathon DQ
+.env
+.env.local
+*.key
+*.pem
+secrets/
