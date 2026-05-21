@@ -10,6 +10,7 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![Samsung ennovateX](https://img.shields.io/badge/Samsung-ennovateX_2026-1428a0.svg)](https://ennovatex.io/ax-hackathon/)
 [![Status](https://img.shields.io/badge/status-Phase_2_in_progress-orange.svg)](#roadmap)
+[![CI](https://github.com/Ajay03299/Neuro-Paging/actions/workflows/ci.yml/badge.svg)](https://github.com/Ajay03299/Neuro-Paging/actions/workflows/ci.yml)
 
 </div>
 
