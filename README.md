@@ -15,7 +15,7 @@
 
 ---
 
-## The pitch, in one line
+## The pitch
 
 > Treat AI memory the way an OS treats RAM. Page the right thoughts to the front of mind, archive the rest, and quietly learn the user's rhythms — so the pages worth keeping warm are already loaded before they ever hit send.
 
