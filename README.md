@@ -224,7 +224,7 @@ Built for **Samsung R&D Institute India–Bangalore** · ennovateX AX Hackathon 
 
 ## Measured baselines
 
-We replace projections with measurements as we build. Current numbers from `bench/` on Apple Silicon M1:
+We replace projections with measurements as we build. Current numbers from `bench/` on Apple Silicon M3 Pro:
 
 - 📈 **hnswlib retrieval** — p95 **0.356 ms** @ 10K vectors. See [`notes/hnswlib_baseline.md`](./notes/hnswlib_baseline.md)
 - 📈 **L1 working context** — p99 insert latency **1.42 µs** @ 32 KB, **1.1M ops/sec** with sustained FIFO eviction. See [`notes/l1_baseline.md`](./notes/l1_baseline.md)
