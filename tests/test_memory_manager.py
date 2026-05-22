@@ -298,3 +298,80 @@ class TestCustomScorer:
         hits = mgr.query("anything", ctx_evening_swiggy)
         assert hits[0].score == 1.0
         assert hits[0].provenance.weights == (0.5, 0.5, 0.0)
+
+        # ── L1 cascade integration  ──────────────────────
+
+
+class TestL1Cascade:
+    """L1 is now real (FIFO + byte budget). Verify the cascade-to-L2 path."""
+
+    def test_l1_capacity_cascades_to_l2(self):
+        """When L1 fills up, evicted memories should land in L2 automatically."""
+        # Tiny L1 (~600B) → 3-4 memories then cascade kicks in
+        mgr = MemoryManager(l1_capacity_bytes=600)
+        ctx = ContextTags.now()
+
+        for i in range(10):
+            mgr.insert(f"memory number {i} with some filler text", ctx)
+
+        stats = mgr.get_stats()
+        # Some memories made it to L2 via cascade
+        assert stats.l2_count > 0, "L1 should have cascaded overflow to L2"
+        # L1 stayed within budget
+        assert stats.l1_bytes <= stats.l1_capacity_bytes
+        # All 10 memories accounted for somewhere
+        assert stats.total_count == 10
+
+    def test_oversized_memory_routes_directly_to_l2(self):
+        """A single memory bigger than L1 capacity should skip L1 entirely."""
+        mgr = MemoryManager(l1_capacity_bytes=512)
+        ctx = ContextTags.now()
+
+        # ~10KB memory, L1 is 512B
+        mid = mgr.insert("x" * 10_000, ctx)
+
+        mem = mgr.get(mid)
+        assert mem is not None
+        assert mem.tier == Tier.L2, "Oversized memory should land in L2"
+
+        stats = mgr.get_stats()
+        assert stats.l1_count == 0
+        assert stats.l2_count == 1
+
+    def test_cascade_demotions_counted(self):
+        """The demotions_24h counter should track cascade events."""
+        mgr = MemoryManager(l1_capacity_bytes=600)
+        ctx = ContextTags.now()
+
+        for i in range(10):
+            mgr.insert(f"memory {i} with filler", ctx)
+
+        stats = mgr.get_stats()
+        assert stats.demotions_24h > 0
+
+    def test_query_finds_memories_in_cascaded_l2(self):
+        """A memory cascaded to L2 must still be findable by query()."""
+        mgr = MemoryManager(l1_capacity_bytes=600)
+        ctx = ContextTags.now()
+
+        target_id = mgr.insert("unique-target-phrase needle", ctx)
+        # Push lots of memories to force the target to cascade to L2
+        for i in range(20):
+            mgr.insert(f"filler memory {i} hay hay hay", ctx)
+
+        hits = mgr.query("needle", ctx, k=10)
+        found_ids = {h.memory_id for h in hits}
+        assert target_id in found_ids
+
+    def test_l1_real_stats_match_underlying(self):
+        """get_stats() should reflect the L1WorkingContext's actual state."""
+        mgr = MemoryManager(l1_capacity_bytes=4096)
+        ctx = ContextTags.now()
+
+        for i in range(3):
+            mgr.insert(f"memory {i}", ctx, tier=Tier.L1)
+
+        stats = mgr.get_stats()
+        assert stats.l1_count == 3
+        assert stats.l1_bytes > 0
+        assert stats.l1_capacity_bytes == 4096
