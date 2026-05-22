@@ -26,13 +26,13 @@ import json
 import platform
 import statistics
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import hnswlib
 import numpy as np
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
+from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 from rich.table import Table
 
 # ── Config ────────────────────────────────────────────────────────────────────
@@ -46,9 +46,9 @@ DIM = 384
 NUM_QUERIES = 1_000
 
 # HNSW hyperparameters — defaults tuned for retrieval quality
-M = 16              # max neighbours per node (higher = better recall, more RAM)
+M = 16  # max neighbours per node (higher = better recall, more RAM)
 EF_CONSTRUCTION = 200  # build-time search width
-EF_SEARCH = 50         # query-time search width
+EF_SEARCH = 50  # query-time search width
 
 # Top-k
 K = 5
@@ -143,7 +143,7 @@ def collect_system_info() -> dict:
         "python_version": platform.python_version(),
         "hnswlib_version": getattr(hnswlib, "__version__", "unknown"),
         "numpy_version": np.__version__,
-        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+        "timestamp_utc": datetime.now(UTC).isoformat(),
     }
 
 
@@ -193,11 +193,13 @@ def write_markdown_report(payload: dict) -> None:
     lines.append("## Config")
     lines.append("")
     lines.append(f"- Vector dim: **{cfg['dim']}** (matches bge-small-en-v1.5)")
-    lines.append(f"- M: **{cfg['M']}**, ef_construction: **{cfg['ef_construction']}**, ef_search: **{cfg['ef_search']}**")
+    lines.append(
+        f"- M: **{cfg['M']}**, ef_construction: **{cfg['ef_construction']}**, ef_search: **{cfg['ef_search']}**"
+    )
     lines.append(f"- Top-k: **{cfg['k']}**")
     lines.append(f"- Queries per corpus size: **{cfg['num_queries']:,}**")
-    lines.append(f"- Distance metric: **cosine**")
-    lines.append(f"- Threads: **1** (single-threaded — realistic mobile profile)")
+    lines.append("- Distance metric: **cosine**")
+    lines.append("- Threads: **1** (single-threaded — realistic mobile profile)")
     lines.append("")
     lines.append("## Results")
     lines.append("")
@@ -217,7 +219,10 @@ def write_markdown_report(payload: dict) -> None:
     lines.append("")
     lines.append("L2 tier target in deck: ~5 ms p50 at ~10K vectors (float16, hot cache).")
     lines.append("")
-    p95_10k = next((r["query_latency_ms"]["p95"] for r in payload["results"] if r["corpus_size"] == 10_000), None)
+    p95_10k = next(
+        (r["query_latency_ms"]["p95"] for r in payload["results"] if r["corpus_size"] == 10_000),
+        None,
+    )
     if p95_10k is not None:
         lines.append(f"Measured p95 at 10K = **{p95_10k:.3f} ms** on this machine.")
         if p95_10k < 5.0:
@@ -240,8 +245,10 @@ def main() -> None:
     NOTES_PATH.parent.mkdir(parents=True, exist_ok=True)
 
     console.rule("[bold cyan]hnswlib baseline")
-    console.print(f"Vector dim: [bold]{DIM}[/bold]   k: [bold]{K}[/bold]   "
-                  f"queries/size: [bold]{NUM_QUERIES:,}[/bold]")
+    console.print(
+        f"Vector dim: [bold]{DIM}[/bold]   k: [bold]{K}[/bold]   "
+        f"queries/size: [bold]{NUM_QUERIES:,}[/bold]"
+    )
     console.print(f"Corpus sizes: {CORPUS_SIZES}")
     console.print()
 
@@ -279,7 +286,7 @@ def main() -> None:
         "results": results,
     }
 
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     json_path = RESULTS_DIR / f"hnswlib_baseline_{timestamp}.json"
     json_path.write_text(json.dumps(payload, indent=2))
     console.print(f"📊 JSON:     [dim]{json_path.relative_to(REPO_ROOT)}[/dim]")

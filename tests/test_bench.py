@@ -88,3 +88,43 @@ def test_benchmark_runs_on_tiny_corpus():
     assert result["query_latency_ms"]["p95"] >= result["query_latency_ms"]["p50"]
     assert result["query_latency_ms"]["p99"] >= result["query_latency_ms"]["p95"]
     assert result["index_size_bytes"] > 0
+
+    # ── L1 baseline tests ──
+
+
+def test_l1_baseline_importable():
+    """Importing the L1 baseline must not crash."""
+    import l1_baseline  # noqa: F401
+
+
+def test_l1_baseline_smoke():
+    """Run the L1 benchmark on a tiny budget to verify shape."""
+    from l1_baseline import (
+        bench_insert_latency,
+        bench_insert_throughput,
+        bench_touch_throughput,
+    )
+
+    from neuro_paging.memory.l1_working import L1WorkingContext
+
+    # Throughput
+    l1 = L1WorkingContext(capacity_bytes=2048)
+    ins = bench_insert_throughput(l1, n=200)
+    assert ins["inserts"] == 200
+    assert ins["throughput_ops_per_sec"] > 0
+    assert ins["final_bytes_used"] <= ins["capacity_bytes"]
+
+    # Latency
+    l1_lat = L1WorkingContext(capacity_bytes=2048)
+    lat = bench_insert_latency(l1_lat, samples=100)
+    assert lat["p50_us"] >= 0
+    assert lat["p95_us"] >= lat["p50_us"]
+    assert lat["p99_us"] >= lat["p95_us"]
+
+    # Touch
+    l1_touch = L1WorkingContext(capacity_bytes=2048)
+    t = bench_touch_throughput(l1_touch, n=200)
+    assert t["touches"] == 200
+    assert t["throughput_ops_per_sec"] > 0
+    # Hit rate must be high since we touch only alive ids
+    assert t["hit_rate"] >= 0.99

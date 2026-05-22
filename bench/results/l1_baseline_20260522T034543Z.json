@@ -1,0 +1,119 @@
+{
+  "system": {
+    "platform": "macOS-15.7.3-arm64-arm-64bit",
+    "machine": "arm64",
+    "processor": "arm",
+    "python_version": "3.11.11",
+    "neuro_paging_version": "0.1.0",
+    "timestamp_utc": "2026-05-22T03:45:43.281189+00:00"
+  },
+  "config": {
+    "n_inserts": 50000,
+    "latency_samples": 5000,
+    "n_touches": 50000,
+    "capacities": [
+      {
+        "label": "32 KB (deck spec)",
+        "bytes": 32768
+      },
+      {
+        "label": "128 KB (4x headroom)",
+        "bytes": 131072
+      },
+      {
+        "label": "1 KB (eviction-heavy)",
+        "bytes": 1024
+      }
+    ],
+    "seed": 42
+  },
+  "results": [
+    {
+      "capacity_label": "32 KB (deck spec)",
+      "capacity_bytes": 32768,
+      "insert_throughput": {
+        "inserts": 50000,
+        "elapsed_seconds": 0.0455,
+        "throughput_ops_per_sec": 1098936.3,
+        "evictions": 49898,
+        "final_count": 102,
+        "final_bytes_used": 32640,
+        "capacity_bytes": 32768,
+        "utilization": 0.9961
+      },
+      "insert_latency": {
+        "samples": 5000,
+        "p50_us": 0.959,
+        "p95_us": 1.291,
+        "p99_us": 1.417,
+        "mean_us": 1.003,
+        "max_us": 10.833
+      },
+      "touch_throughput": {
+        "touches": 50000,
+        "elapsed_seconds": 0.0087,
+        "throughput_ops_per_sec": 5758599.3,
+        "hit_rate": 1.0,
+        "alive_ids_after_preload": 105
+      }
+    },
+    {
+      "capacity_label": "128 KB (4x headroom)",
+      "capacity_bytes": 131072,
+      "insert_throughput": {
+        "inserts": 50000,
+        "elapsed_seconds": 0.0445,
+        "throughput_ops_per_sec": 1122674.7,
+        "evictions": 49591,
+        "final_count": 409,
+        "final_bytes_used": 130880,
+        "capacity_bytes": 131072,
+        "utilization": 0.9985
+      },
+      "insert_latency": {
+        "samples": 5000,
+        "p50_us": 1.041,
+        "p95_us": 1.334,
+        "p99_us": 1.584,
+        "mean_us": 1.081,
+        "max_us": 18.25
+      },
+      "touch_throughput": {
+        "touches": 50000,
+        "elapsed_seconds": 0.0086,
+        "throughput_ops_per_sec": 5788432.5,
+        "hit_rate": 1.0,
+        "alive_ids_after_preload": 200
+      }
+    },
+    {
+      "capacity_label": "1 KB (eviction-heavy)",
+      "capacity_bytes": 1024,
+      "insert_throughput": {
+        "inserts": 50000,
+        "elapsed_seconds": 0.0443,
+        "throughput_ops_per_sec": 1129590.4,
+        "evictions": 49997,
+        "final_count": 3,
+        "final_bytes_used": 960,
+        "capacity_bytes": 1024,
+        "utilization": 0.9375
+      },
+      "insert_latency": {
+        "samples": 5000,
+        "p50_us": 1.0,
+        "p95_us": 1.25,
+        "p99_us": 1.375,
+        "mean_us": 1.016,
+        "max_us": 13.042
+      },
+      "touch_throughput": {
+        "touches": 50000,
+        "elapsed_seconds": 0.0085,
+        "throughput_ops_per_sec": 5885353.1,
+        "hit_rate": 1.0,
+        "alive_ids_after_preload": 3
+      }
+    }
+  ]
+}
