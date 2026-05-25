@@ -41,7 +41,7 @@ from __future__ import annotations
 
 import threading
 from dataclasses import dataclass
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import hnswlib
@@ -373,7 +373,7 @@ class L2HotVectorCache:
         # still want eviction semantics for the byte budget and LRU policy.)
         live_count = self._metadata.count(Tier.L2)
         if live_count >= self._max_elements:
-            far_future = datetime.now(timezone.utc).replace(year=9999)
+            far_future = datetime.now(UTC).replace(year=9999)
             candidates = self._metadata.find_cold(Tier.L2, older_than=far_future)
             if candidates:
                 victim_id = candidates[0]

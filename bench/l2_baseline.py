@@ -38,7 +38,7 @@ import statistics
 import tempfile
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np
@@ -69,9 +69,9 @@ INSERTS_PRESSURE = 5_000
 K = 5
 
 # L2 capacities
-STEADY_CAPACITY_BYTES = 64 * 1024 * 1024     # 64 MB — no eviction expected
-PRESSURE_CAPACITY_BYTES = 2 * 1024 * 1024    # 2 MB — sustained eviction
-QUERY_CAPACITY_BYTES = 256 * 1024 * 1024     # 256 MB — fits all corpus sizes
+STEADY_CAPACITY_BYTES = 64 * 1024 * 1024  # 64 MB — no eviction expected
+PRESSURE_CAPACITY_BYTES = 2 * 1024 * 1024  # 2 MB — sustained eviction
+QUERY_CAPACITY_BYTES = 256 * 1024 * 1024  # 256 MB — fits all corpus sizes
 
 # Reproducibility
 SEED = 42
@@ -98,7 +98,7 @@ def percentile(data: list[float], pct: float) -> float:
 def make_memory(text: str, rng: np.random.Generator) -> tuple[Memory, np.ndarray]:
     """Build a memory + a unit-norm random embedding."""
     mid = MemoryId(str(uuid.uuid4()))
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     mem = Memory(
         id=mid,
         text=text,
@@ -243,13 +243,14 @@ def bench_query_latency(data_dir: Path, corpus_size: int) -> dict:
 
 def collect_system_info() -> dict:
     import neuro_paging
+
     return {
         "platform": platform.platform(),
         "machine": platform.machine(),
         "processor": platform.processor() or platform.machine(),
         "python_version": platform.python_version(),
         "neuro_paging_version": neuro_paging.__version__,
-        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+        "timestamp_utc": datetime.now(UTC).isoformat(),
     }
 
 
@@ -320,7 +321,9 @@ def write_markdown_report(payload: dict) -> None:
     lines.append("")
     lines.append("Two regimes: low-utilization steady-state, and tight-budget eviction-heavy.")
     lines.append("")
-    lines.append("| Regime | Inserts | Throughput (ops/s) | Evictions | p50 (µs) | p95 (µs) | p99 (µs) |")
+    lines.append(
+        "| Regime | Inserts | Throughput (ops/s) | Evictions | p50 (µs) | p95 (µs) | p99 (µs) |"
+    )
     lines.append("| :--- | ---: | ---: | ---: | ---: | ---: | ---: |")
     s = payload["steady_insert"]
     p = payload["pressure_insert"]
@@ -362,8 +365,7 @@ def write_markdown_report(payload: dict) -> None:
         p50_us = target["p50_us"]
         p50_ms = p50_us / 1000.0
         lines.append(
-            f"Measured p50 query latency at 10K vectors = **{p50_us:.1f} µs** "
-            f"({p50_ms:.3f} ms)."
+            f"Measured p50 query latency at 10K vectors = **{p50_us:.1f} µs** ({p50_ms:.3f} ms)."
         )
         if p50_ms < 5.0:
             ratio = 5.0 / p50_ms if p50_ms > 0 else float("inf")
@@ -462,7 +464,7 @@ def main() -> None:
         "query_latency": query_results,
     }
 
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     json_path = RESULTS_DIR / f"l2_baseline_{timestamp}.json"
     json_path.write_text(json.dumps(payload, indent=2))
     console.print(f"📊 JSON:     [dim]{json_path.relative_to(REPO_ROOT)}[/dim]")

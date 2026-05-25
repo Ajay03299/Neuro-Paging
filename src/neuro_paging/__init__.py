@@ -7,6 +7,7 @@ Built for Samsung ennovateX AX Hackathon 2026 by team ByteMe.
 """
 
 from neuro_paging.context import BatteryState, ContextTags, TimeBucket
+from neuro_paging.daemons import PowerStateProvider, Pruner, PrunerConfig
 from neuro_paging.memory import (
     Hit,
     Memory,
@@ -29,7 +30,10 @@ __all__ = [
     "Memory",
     "MemoryId",
     "MemoryManager",
+    "PowerStateProvider",
     "Provenance",
+    "Pruner",
+    "PrunerConfig",
     "Scorer",
     "Tier",
     "TierStats",

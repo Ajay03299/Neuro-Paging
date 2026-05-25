@@ -16,23 +16,18 @@ dependencies = [
     "hnswlib>=0.8.0",
     "numpy>=1.26",
     "scipy>=1.11",
-
     # Pipeline orchestration
     "langgraph>=0.0.40",
     "langchain-core>=0.1.50",
-
     # Scheduling (background daemons)
     "apscheduler>=3.10",
-
     # Pattern mining & clustering
     "mlxtend>=0.23",
     "hdbscan>=0.8.33",
     "scikit-learn>=1.4",
-
     # Dashboard
     "streamlit>=1.30",
     "plotly>=5.18",
-
     # Utilities
     "pydantic>=2.5",
     "loguru>=0.7",
