@@ -128,3 +128,37 @@ def test_l1_baseline_smoke():
     assert t["throughput_ops_per_sec"] > 0
     # Hit rate must be high since we touch only alive ids
     assert t["hit_rate"] >= 0.99
+
+    # ── L2 baseline tests ─────────────────────────────────────────────────────────
+
+
+def test_l2_baseline_importable():
+    """Importing the L2 baseline must not crash."""
+    import l2_baseline  # noqa: F401
+
+
+def test_l2_baseline_smoke(tmp_path):
+    """Run the L2 benchmark on a tiny scale to verify shape."""
+    from l2_baseline import (
+        bench_pressure_insert,
+        bench_query_latency,
+        bench_steady_insert,
+    )
+
+    # Steady (tiny)
+    s = bench_steady_insert(tmp_path / "steady", n=50)
+    assert s["inserts"] == 50
+    assert s["throughput_ops_per_sec"] > 0
+    assert s["p50_us"] >= 0
+    assert s["p95_us"] >= s["p50_us"]
+
+    # Pressure
+    p = bench_pressure_insert(tmp_path / "pressure", n=50)
+    assert p["inserts"] == 50
+    assert p["throughput_ops_per_sec"] > 0
+
+    # Query
+    q = bench_query_latency(tmp_path / "query", corpus_size=100)
+    assert q["corpus_size"] == 100
+    assert q["p50_us"] >= 0
+    assert q["p99_us"] >= q["p50_us"]

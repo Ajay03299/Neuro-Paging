@@ -1,0 +1,79 @@
+{
+  "system": {
+    "platform": "macOS-15.7.3-arm64-arm-64bit",
+    "machine": "arm64",
+    "processor": "arm",
+    "python_version": "3.11.11",
+    "neuro_paging_version": "0.1.0",
+    "timestamp_utc": "2026-05-25T07:56:57.535239+00:00"
+  },
+  "config": {
+    "dim": 384,
+    "inserts_steady": 5000,
+    "inserts_pressure": 5000,
+    "query_corpus_sizes": [
+      1000,
+      10000,
+      50000
+    ],
+    "num_queries": 500,
+    "k": 5,
+    "steady_capacity_bytes": 67108864,
+    "pressure_capacity_bytes": 2097152,
+    "query_capacity_bytes": 268435456,
+    "seed": 42
+  },
+  "steady_insert": {
+    "inserts": 5000,
+    "elapsed_seconds": 7.588,
+    "throughput_ops_per_sec": 658.9,
+    "evictions": 0,
+    "final_count": 5000,
+    "p50_us": 1527.63,
+    "p95_us": 2668.75,
+    "p99_us": 2989.79,
+    "mean_us": 1507.76
+  },
+  "pressure_insert": {
+    "inserts": 5000,
+    "elapsed_seconds": 10.7713,
+    "throughput_ops_per_sec": 464.2,
+    "evictions": 3664,
+    "final_count": 1336,
+    "bytes_used": 2096184,
+    "capacity_bytes": 2097152,
+    "p50_us": 2512.46,
+    "p95_us": 3170.92,
+    "p99_us": 4280.25,
+    "mean_us": 2143.43
+  },
+  "query_latency": [
+    {
+      "corpus_size": 1000,
+      "queries": 500,
+      "p50_us": 245.12,
+      "p95_us": 259.96,
+      "p99_us": 292.42,
+      "mean_us": 247.78,
+      "max_us": 523.67
+    },
+    {
+      "corpus_size": 10000,
+      "queries": 500,
+      "p50_us": 782.17,
+      "p95_us": 861.33,
+      "p99_us": 938.04,
+      "mean_us": 787.4,
+      "max_us": 1154.13
+    },
+    {
+      "corpus_size": 50000,
+      "queries": 500,
+      "p50_us": 2626.63,
+      "p95_us": 2788.37,
+      "p99_us": 2875.46,
+      "mean_us": 2638.48,
+      "max_us": 3151.37
+    }
+  ]
+}

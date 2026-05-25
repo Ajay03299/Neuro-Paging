@@ -41,7 +41,7 @@ from __future__ import annotations
 
 import threading
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timezone
 from pathlib import Path
 
 import hnswlib
@@ -325,61 +325,67 @@ class L2HotVectorCache:
         return evicted
 
     def _ensure_capacity_for_insert(self) -> list[Memory]:
-        """Make room for one more vector. Two-pronged approach:
+        """Make room for one more vector.
 
-        1. If the index has been mark_deleted-ed enough that there are free
-           slots logically but we're at max_elements physically, evict the
-           coldest entry. (Real eviction = mark_deleted + metadata delete.)
+        TWO INDEPENDENT CONCERNS — handle both:
 
-        2. If we genuinely need more physical slots than max_elements,
-           resize the index with 50% headroom. hnswlib supports this
-           and it's the only way around the "mark_deleted doesn't free
-           slots" limitation.
+        1. PHYSICAL slot exhaustion: hnswlib's index has a fixed allocated
+           size (max_elements). mark_deleted() does NOT reclaim slots — it
+           just tombstones the label. So even after evicting, the next
+           add_items() can fail if the physical slots are full. Fix: check
+           index.get_current_count() (physical slots used INCLUDING
+           tombstones) and resize if needed.
+
+        2. LOGICAL eviction: if live_count is at the desired ceiling
+           (max_elements), evict the coldest entry. This keeps the live
+           population bounded.
+
+        Order matters: do physical grow FIRST (so add_items will succeed),
+        then logical eviction (so live_count stays bounded).
 
         Returns evicted memories so caller can demote them to L3.
         Caller holds the lock.
         """
         evicted: list[Memory] = []
-        live_count = self._metadata.count(Tier.L2)
 
-        # We need 1 free slot. live_count tells us how many slots we're
-        # actively using; the index allocated max_elements total.
-        if live_count < self._max_elements:
-            # Plenty of room — no action needed
-            return evicted
-
-        # We're at or above max_elements. Evict the coldest entry first
-        # to keep live_count under control.
-        far_future = datetime.now(UTC).replace(year=9999)
-        candidates = self._metadata.find_cold(Tier.L2, older_than=far_future)
-        if candidates:
-            victim_id = candidates[0]
-            victim = self._metadata.get(victim_id)
-            if victim is not None:
-                label = self._metadata.label_for(victim_id)
-                if label is not None:
-                    self._index.mark_deleted(label)
-                    self._tombstones += 1
-                self._metadata.delete(victim_id)
-                self._evictions_total += 1
-                evicted.append(victim)
-
-        # Even after evicting, the underlying HNSW index's PHYSICAL slot count
-        # may still be full because mark_deleted() doesn't reclaim slots.
-        # Grow the index with headroom so subsequent inserts have room.
-        current_element_count = self._index.get_current_count()
-        if current_element_count >= self._max_elements:
+        # ── Concern 1: physical slot exhaustion ──
+        # get_current_count() counts ALL labels ever added (including
+        # tombstoned ones). If it's at the cap, the next add_items will
+        # raise even if logically we have room.
+        physical_count = self._index.get_current_count()
+        if physical_count >= self._max_elements:
             # Grow by 50% headroom, minimum +16 slots
             new_max = max(self._max_elements * 3 // 2, self._max_elements + 16)
             try:
                 self._index.resize_index(new_max)
                 self._max_elements = new_max
                 logger.debug(
-                    f"L2 grew HNSW index: {current_element_count} used, new max_elements={new_max}"
+                    f"L2 grew HNSW index: {physical_count} used "
+                    f"(incl. tombstones), new max_elements={new_max}"
                 )
             except RuntimeError as e:
                 logger.error(f"L2 resize_index failed: {e}")
                 raise
+
+        # ── Concern 2: logical eviction ──
+        # If live count is at the ceiling, evict the coldest entry to keep
+        # the live population bounded. (We may have just grown, but we
+        # still want eviction semantics for the byte budget and LRU policy.)
+        live_count = self._metadata.count(Tier.L2)
+        if live_count >= self._max_elements:
+            far_future = datetime.now(timezone.utc).replace(year=9999)
+            candidates = self._metadata.find_cold(Tier.L2, older_than=far_future)
+            if candidates:
+                victim_id = candidates[0]
+                victim = self._metadata.get(victim_id)
+                if victim is not None:
+                    label = self._metadata.label_for(victim_id)
+                    if label is not None:
+                        self._index.mark_deleted(label)
+                        self._tombstones += 1
+                    self._metadata.delete(victim_id)
+                    self._evictions_total += 1
+                    evicted.append(victim)
 
         return evicted
 
