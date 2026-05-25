@@ -23,9 +23,12 @@ from neuro_paging import (
 
 
 @pytest.fixture
-def mgr() -> MemoryManager:
-    """Fresh manager per test."""
-    return MemoryManager()
+def mgr(tmp_path) -> MemoryManager:  # type: ignore
+    """Fresh manager per test. Uses tmp_path so L2's on-disk state
+    is isolated per test."""
+    m = MemoryManager(data_dir=tmp_path / "neuro-paging")
+    yield m
+    m.close()
 
 
 @pytest.fixture
@@ -305,10 +308,9 @@ class TestCustomScorer:
 class TestL1Cascade:
     """L1 is now real (FIFO + byte budget). Verify the cascade-to-L2 path."""
 
-    def test_l1_capacity_cascades_to_l2(self):
+    def test_l1_capacity_cascades_to_l2(self, tmp_path):
         """When L1 fills up, evicted memories should land in L2 automatically."""
-        # Tiny L1 (~600B) → 3-4 memories then cascade kicks in
-        mgr = MemoryManager(l1_capacity_bytes=600)
+        mgr = MemoryManager(data_dir=tmp_path / "np", l1_capacity_bytes=600)
         ctx = ContextTags.now()
 
         for i in range(10):
@@ -321,10 +323,11 @@ class TestL1Cascade:
         assert stats.l1_bytes <= stats.l1_capacity_bytes
         # All 10 memories accounted for somewhere
         assert stats.total_count == 10
+        mgr.close()
 
-    def test_oversized_memory_routes_directly_to_l2(self):
+    def test_oversized_memory_routes_directly_to_l2(self, tmp_path):
         """A single memory bigger than L1 capacity should skip L1 entirely."""
-        mgr = MemoryManager(l1_capacity_bytes=512)
+        mgr = MemoryManager(data_dir=tmp_path / "np", l1_capacity_bytes=512)
         ctx = ContextTags.now()
 
         # ~10KB memory, L1 is 512B
@@ -337,10 +340,11 @@ class TestL1Cascade:
         stats = mgr.get_stats()
         assert stats.l1_count == 0
         assert stats.l2_count == 1
+        mgr.close()
 
-    def test_cascade_demotions_counted(self):
+    def test_cascade_demotions_counted(self, tmp_path):
         """The demotions_24h counter should track cascade events."""
-        mgr = MemoryManager(l1_capacity_bytes=600)
+        mgr = MemoryManager(data_dir=tmp_path / "np", l1_capacity_bytes=600)
         ctx = ContextTags.now()
 
         for i in range(10):
@@ -348,10 +352,11 @@ class TestL1Cascade:
 
         stats = mgr.get_stats()
         assert stats.demotions_24h > 0
+        mgr.close()
 
-    def test_query_finds_memories_in_cascaded_l2(self):
+    def test_query_finds_memories_in_cascaded_l2(self, tmp_path):
         """A memory cascaded to L2 must still be findable by query()."""
-        mgr = MemoryManager(l1_capacity_bytes=600)
+        mgr = MemoryManager(data_dir=tmp_path / "np", l1_capacity_bytes=600)
         ctx = ContextTags.now()
 
         target_id = mgr.insert("unique-target-phrase needle", ctx)
@@ -362,10 +367,11 @@ class TestL1Cascade:
         hits = mgr.query("needle", ctx, k=10)
         found_ids = {h.memory_id for h in hits}
         assert target_id in found_ids
+        mgr.close()
 
-    def test_l1_real_stats_match_underlying(self):
+    def test_l1_real_stats_match_underlying(self, tmp_path):
         """get_stats() should reflect the L1WorkingContext's actual state."""
-        mgr = MemoryManager(l1_capacity_bytes=4096)
+        mgr = MemoryManager(data_dir=tmp_path / "np", l1_capacity_bytes=4096)
         ctx = ContextTags.now()
 
         for i in range(3):
@@ -375,3 +381,4 @@ class TestL1Cascade:
         assert stats.l1_count == 3
         assert stats.l1_bytes > 0
         assert stats.l1_capacity_bytes == 4096
+        mgr.close()
