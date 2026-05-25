@@ -31,6 +31,7 @@ import threading
 from collections import OrderedDict
 from collections.abc import Iterator
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 from loguru import logger
 
@@ -196,17 +197,35 @@ class L1WorkingContext:
             return mem
 
     def touch(self, memory_id: MemoryId) -> bool:
-        """Mark a memory as freshly accessed — moves it to the back of FIFO.
+        """Mark a memory as freshly accessed.
+
+        Two effects:
+          1. Move to the back of FIFO so it survives the next eviction round
+          2. Bump access_count + refresh last_touch on the Memory record
 
         Called by the manager when a memory in L1 is returned by query().
-        Keeps recently-used items from being evicted first.
 
         Returns True if the memory was in L1, False otherwise.
         """
         with self._lock:
             if memory_id not in self._buf:
                 return False
-            self._buf.move_to_end(memory_id, last=True)
+            old = self._buf[memory_id]
+
+            updated = Memory(
+                id=old.id,
+                text=old.text,
+                embedding_ref=old.embedding_ref,
+                context=old.context,
+                tier=old.tier,
+                created_at=old.created_at,
+                last_touch=datetime.now(UTC),
+                access_count=old.access_count + 1,
+                is_consolidated=old.is_consolidated,
+            )
+
+            del self._buf[memory_id]
+            self._buf[memory_id] = updated
             return True
 
     def clear(self) -> list[Memory]:

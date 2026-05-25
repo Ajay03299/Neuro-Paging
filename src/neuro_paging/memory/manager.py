@@ -1,12 +1,9 @@
-"""MemoryManager — the public API between Ajay's substrate and Christine's
+"""MemoryManager — the public API between the substrate and
 intelligence layer.
 
-THIS IS A CONTRACT. Method signatures here are locked at git tag api-v0.1.0.
+ Method signatures here are locked at git tag api-v0.1.0.
 Behavior fills in across Sprints 1-4.
 
-Christine's layer should NEVER reach behind this interface. If she
-finds herself wanting to, that's a signal to widen the interface
-together — not to bypass it.
 
 Quick map of methods:
     insert(...)     → store a new memory. Returns MemoryId.
@@ -17,14 +14,15 @@ Quick map of methods:
     forget(...)     → hard delete. Use sparingly.
     get_stats()     → live tier observability.
 
-Backend status (May 22, 2026):
+Backend status (May 23, 2026):
     L1: REAL — L1WorkingContext with FIFO + byte budget
-    L2: stub — in-memory dict (real HNSW backend lands Sprint 1)
+    L2: REAL — L2HotVectorCache with HNSW + SQLite metadata
     L3: stub — in-memory dict (real PQ-int8 backend lands Sprint 2)
 
-The L2/L3 stubs are intentionally minimal. The integration *pattern* —
-how the manager talks to a tier backend — is fully exercised by the
-real L1. When real L2/L3 land, they slot into the same call sites.
+Plug-in protocols:
+    Scorer:   Christine's router. Called for every query candidate.
+    Embedder: Christine's bge-small wrapper. Called once per insert
+              when a memory crosses into L2.
 """
 
 from __future__ import annotations
@@ -32,12 +30,15 @@ from __future__ import annotations
 import time
 import uuid
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Protocol
 
+import numpy as np
 from loguru import logger
 
 from neuro_paging.context.types import ContextTags
 from neuro_paging.memory.l1_working import L1WorkingContext
+from neuro_paging.memory.l2_cache import L2HotVectorCache
 from neuro_paging.memory.types import (
     Hit,
     Memory,
@@ -47,7 +48,7 @@ from neuro_paging.memory.types import (
     TierStats,
 )
 
-# ── Scoring callback ──────────────────────────────────────────────────────────
+# ── Plug-in protocols ─────────────────────────────────────────────────────────
 
 
 class Scorer(Protocol):
@@ -61,6 +62,22 @@ class Scorer(Protocol):
     ) -> tuple[float, Provenance]:
         """Return (final_score, provenance) for this memory given the query."""
         ...
+
+
+class Embedder(Protocol):
+    """The contract the embedder must implement. Christine owns this.
+
+    Called by the manager when a memory needs an embedding (i.e. crosses
+    into L2 or L3). For pure L1 use, the embedder is never invoked —
+    manager works fine without one.
+    """
+
+    def embed(self, text: str) -> np.ndarray:
+        """Return a (dim,) float32 ndarray for the given text."""
+        ...
+
+
+# ── Default stubs ─────────────────────────────────────────────────────────────
 
 
 class _DefaultStubScorer:
@@ -96,10 +113,38 @@ class _DefaultStubScorer:
         return score, prov
 
 
+class _DefaultStubEmbedder:
+    """Deterministic random embedder for tests + dev.
+
+    Hashes the text to seed a numpy RNG, then samples a unit-norm
+    vector. Same text always returns the same vector — so retrieval
+    of "Italian food" twice in a row still finds the same neighbors.
+
+    Replaced by Christine's bge-small wrapper at construction time.
+    """
+
+    def __init__(self, dim: int = 384) -> None:
+        self._dim = dim
+
+    def embed(self, text: str) -> np.ndarray:
+        # Stable seed from text — same text → same vector
+        seed = abs(hash(text)) % (2**32)
+        rng = np.random.default_rng(seed)
+        v = rng.standard_normal(self._dim).astype(np.float32)
+        v /= np.linalg.norm(v) + 1e-8
+        return v
+
+
 # ── Default tier capacities (overridable via constructor) ─────────────────────
 DEFAULT_L1_CAPACITY_BYTES = 32 * 1024  # 32 KB
 DEFAULT_L2_CAPACITY_BYTES = 8 * 1024 * 1024  # 8 MB
 DEFAULT_L3_CAPACITY_BYTES = 128 * 1024 * 1024  # 128 MB
+
+# Default HNSW starting slot count for L2
+DEFAULT_L2_MAX_ELEMENTS = 10_000
+
+# Default embedding dimension (matches bge-small-en-v1.5)
+DEFAULT_EMBEDDING_DIM = 384
 
 
 # ── The contract ──────────────────────────────────────────────────────────────
@@ -109,26 +154,57 @@ class MemoryManager:
     """The public API for the tiered memory subsystem.
 
     Construct once at app startup, share across the pipeline.
-    Thread-safety: L1 is internally locked. The L2/L3 stubs are
-    single-threaded today; real backends will be locked too.
+
+    Args:
+        data_dir: where L2 persists (HNSW index + SQLite metadata).
+            Defaults to ".neuro-paging" under cwd. For tests, pass a
+            tmp_path. For production, pass a per-user dir.
+        scorer: Christine's routing function. Defaults to a stub.
+        embedder: Christine's text→vector wrapper. Defaults to a
+            deterministic stub.
+        l1_capacity_bytes: L1 byte budget. Default 32 KB.
+        l2_capacity_bytes: L2 byte budget. Default 8 MB.
+        l2_max_elements: L2 HNSW starting slot count. Grows
+            geometrically when exhausted.
+        l3_capacity_bytes: L3 byte budget (stub for now). Default 128 MB.
+        embedding_dim: L2 vector dim. Must match the embedder's output.
+
+    Thread-safety: L1 and L2 have their own internal locks. The manager
+    itself holds an RLock to keep multi-store mutations atomic.
     """
 
     def __init__(
         self,
+        data_dir: Path | str | None = None,
         scorer: Scorer | None = None,
+        embedder: Embedder | None = None,
         l1_capacity_bytes: int = DEFAULT_L1_CAPACITY_BYTES,
         l2_capacity_bytes: int = DEFAULT_L2_CAPACITY_BYTES,
+        l2_max_elements: int = DEFAULT_L2_MAX_ELEMENTS,
         l3_capacity_bytes: int = DEFAULT_L3_CAPACITY_BYTES,
+        embedding_dim: int = DEFAULT_EMBEDDING_DIM,
     ) -> None:
         self._scorer = scorer or _DefaultStubScorer()
-        self._l2_cap = l2_capacity_bytes
+        self._embedder = embedder or _DefaultStubEmbedder(dim=embedding_dim)
         self._l3_cap = l3_capacity_bytes
+        self._embedding_dim = embedding_dim
 
-        # ── REAL L1 backend (FIFO + byte budget) ──
+        # Resolve data dir
+        self._data_dir = Path(data_dir) if data_dir is not None else Path(".neuro-paging")
+        self._data_dir.mkdir(parents=True, exist_ok=True)
+
+        # ── REAL L1 backend ──
         self._l1 = L1WorkingContext(capacity_bytes=l1_capacity_bytes)
 
-        # ── STUB L2/L3 backends — real implementations land Sprint 1/2 ──
-        self._l2: dict[MemoryId, Memory] = {}
+        # ── REAL L2 backend (HNSW + SQLite metadata sidecar) ──
+        self._l2 = L2HotVectorCache(
+            data_dir=self._data_dir / "l2",
+            capacity_bytes=l2_capacity_bytes,
+            max_elements=l2_max_elements,
+            dim=embedding_dim,
+        )
+
+        # ── STUB L3 — real backend lands Sprint 2 ──
         self._l3: dict[MemoryId, Memory] = {}
 
         # Rolling counters for get_stats()
@@ -139,8 +215,22 @@ class MemoryManager:
 
         logger.debug(
             "MemoryManager initialised — "
-            f"L1=REAL({l1_capacity_bytes}B) L2=stub({l2_capacity_bytes}B) L3=stub({l3_capacity_bytes}B)"
+            f"L1=REAL({l1_capacity_bytes}B) "
+            f"L2=REAL({l2_capacity_bytes}B/{l2_max_elements}slots) "
+            f"L3=stub({l3_capacity_bytes}B) "
+            f"data_dir={self._data_dir}"
         )
+
+    # ── Lifecycle ─────────────────────────────────────────────────────────────
+
+    def close(self) -> None:
+        """Persist L2 to disk and close all backends.
+
+        Call at app shutdown. Failing to call risks losing in-memory L2
+        index changes (the SQLite sidecar is always persistent; only the
+        HNSW index file is written on close()).
+        """
+        self._l2.close()
 
     # ── Internal: locate a memory across tiers ────────────────────────────────
 
@@ -154,31 +244,53 @@ class MemoryManager:
             return mem
         return self._l3.get(memory_id)
 
+    def _which_tier(self, memory_id: MemoryId) -> Tier | None:
+        """Which tier contains this memory? None if not found anywhere."""
+        if self._l1.contains(memory_id):
+            return Tier.L1
+        if self._l2.contains(memory_id):
+            return Tier.L2
+        if memory_id in self._l3:
+            return Tier.L3
+        return None
+
     def _remove_from_any_tier(self, memory_id: MemoryId) -> Memory | None:
         """Remove a memory from whichever tier it currently lives in."""
         mem = self._l1.remove(memory_id)
         if mem is not None:
             return mem
-        if memory_id in self._l2:
-            return self._l2.pop(memory_id)
+        mem = self._l2.remove(memory_id)
+        if mem is not None:
+            return mem
         if memory_id in self._l3:
             return self._l3.pop(memory_id)
         return None
 
+    def _put_in_l2(self, memory: Memory) -> list[Memory]:
+        """Embed + insert into L2. Returns memories L2 evicted (for L3 demote).
+
+        Helper for cascade-demote (L1 → L2) and direct L2 insert paths.
+        """
+        # Tier metadata may be wrong (e.g., a memory cascading from L1
+        # still has tier=Tier.L1). Fix it before insertion.
+        memory_for_l2 = self._with_tier(memory, Tier.L2)
+        embedding = self._embedder.embed(memory_for_l2.text)
+        return self._l2.insert(memory_for_l2, embedding)
+
     def _put_in_tier(self, memory: Memory, tier: Tier) -> list[Memory]:
         """Place a memory into the target tier. Returns memories evicted
-        from L1 (if any) so the caller can cascade them to L2.
+        from the destination tier (so caller can cascade them).
 
-        L2 and L3 are stubs today — no eviction logic. Real backends will
-        return their own evicted memories from this method.
+        L1 → returns L1 evictions (which cascade to L2)
+        L2 → returns L2 evictions (which cascade to L3)
+        L3 → stub for now, no eviction logic
         """
         if tier == Tier.L1:
             return self._l1.insert(memory)
         elif tier == Tier.L2:
-            self._l2[memory.id] = memory
-            return []
+            return self._put_in_l2(memory)
         else:  # L3
-            self._l3[memory.id] = memory
+            self._l3[memory.id] = self._with_tier(memory, Tier.L3)
             return []
 
     def _with_tier(self, memory: Memory, new_tier: Tier) -> Memory:
@@ -195,6 +307,13 @@ class MemoryManager:
             is_consolidated=memory.is_consolidated,
         )
 
+    def _cascade_to_l3(self, evicted_from_l2: list[Memory]) -> None:
+        """Land L2-evicted memories in the (stub) L3 store."""
+        for ev in evicted_from_l2:
+            self._l3[ev.id] = self._with_tier(ev, Tier.L3)
+            self._demotions_24h += 1
+            logger.trace(f"cascade-demote L2->L3 id={ev.id}")
+
     # ── Write path ────────────────────────────────────────────────────────────
 
     def insert(
@@ -206,12 +325,11 @@ class MemoryManager:
     ) -> MemoryId:
         """Store a memory. Returns the assigned id.
 
-        New memories default to L1. If L1 is full, oldest entries cascade
-        down to L2 automatically (mirrors the daemon-driven flow that
-        Sprint 2 formalises).
+        New memories default to L1. If L1 fills, evicted memories cascade
+        to L2 automatically. If L2 fills, those memories cascade to L3.
 
-        Direct insert to L2/L3 is supported for loading historical data
-        and tests.
+        Direct insert to L2/L3 is supported for loading historical data,
+        consolidator writes, and tests.
         """
         if not text.strip():
             raise ValueError("Cannot insert empty memory text")
@@ -221,7 +339,7 @@ class MemoryManager:
         memory = Memory(
             id=mem_id,
             text=text,
-            embedding_ref=f"stub-emb:{mem_id}",  # real impl owns the embedding
+            embedding_ref=f"l2:{mem_id}",  # filled in by L2 if it lands there
             context=context,
             tier=tier,
             created_at=now,
@@ -231,23 +349,28 @@ class MemoryManager:
         )
 
         try:
-            evicted_from_l1 = self._put_in_tier(memory, tier)
+            evicted_from_target = self._put_in_tier(memory, tier)
         except ValueError:
             # Oversized for L1 — route directly to L2 instead.
-            # In real backends, L2 will accept anything L1 can't.
             logger.info(f"insert id={mem_id} oversized for L1, routing to L2 directly")
-            big_mem = self._with_tier(memory, Tier.L2)
-            self._l2[mem_id] = big_mem
+            l2_evicted = self._put_in_l2(memory)
+            self._cascade_to_l3(l2_evicted)
             return mem_id
 
-        # Cascade L1 evictions down to L2. This is the natural-flow demotion
-        # path. It complements (but does not replace) the explicit demote()
-        # method that the pruner daemon uses.
-        for ev in evicted_from_l1:
-            demoted = self._with_tier(ev, Tier.L2)
-            self._l2[ev.id] = demoted
-            self._demotions_24h += 1
-            logger.trace(f"cascade-demote L1->L2 id={ev.id}")
+        # Cascade chain:
+        # - If we just inserted into L1, evictions are L1 spillover → L2
+        # - If we just inserted into L2, evictions are L2 spillover → L3
+        # - If we just inserted into L3, no further cascade
+        if tier == Tier.L1 and evicted_from_target:
+            for ev in evicted_from_target:
+                l2_evicted = self._put_in_l2(ev)
+                self._demotions_24h += 1
+                logger.trace(f"cascade-demote L1->L2 id={ev.id}")
+                # L2 might have evicted in turn — those land in L3
+                self._cascade_to_l3(l2_evicted)
+        elif tier == Tier.L2 and evicted_from_target:
+            self._cascade_to_l3(evicted_from_target)
+        # tier == Tier.L3: nothing to cascade
 
         logger.trace(f"insert id={mem_id} tier={tier.value} len={len(text)}")
         return mem_id
@@ -266,57 +389,63 @@ class MemoryManager:
 
         `min_tier=L1` means L1-only (fastest, cheapest, lowest recall).
         `min_tier=L3` (default) means search all tiers.
+
+        Strategy: gather candidates from each tier (L1 via iter, L2 via
+        HNSW ANN, L3 via dict iter), then re-rank with Christine's scorer.
+
+        Note: L2 uses ANN over a single embedding of the query text. The
+        scorer still sees every candidate and produces the final ranking,
+        so the ANN's job is just to surface a useful candidate pool.
         """
         if k <= 0:
             return []
         self._queries_24h += 1
 
-        # Build candidate set across tiers based on min_tier rank.
-        # min_tier.rank: L3=0, L2=1, L1=2. We include tiers >= min_tier.rank.
+        # ── Gather candidates ──
         candidates: list[Memory] = []
+
         if Tier.L1.rank >= min_tier.rank:
             candidates.extend(iter(self._l1))
-        if Tier.L2.rank >= min_tier.rank:
-            candidates.extend(self._l2.values())
+
+        if Tier.L2.rank >= min_tier.rank and len(self._l2) > 0:
+            # Embed the query and ask L2 for top-(k * 4) — give the scorer
+            # a wider pool than k since context-aware re-ranking may
+            # promote a lower-distance candidate.
+            try:
+                query_embedding = self._embedder.embed(text)
+                l2_hits = self._l2.query(query_embedding, k=max(k * 4, k))
+                candidates.extend(mem for mem, _dist in l2_hits)
+            except Exception as e:  # noqa: BLE001
+                # Embedder failure shouldn't take down query — log and continue
+                # with just L1 + L3 candidates
+                logger.warning(f"L2 ANN query failed: {e}")
+
         if Tier.L3.rank >= min_tier.rank:
             candidates.extend(self._l3.values())
 
-        # Score each candidate
+        if not candidates:
+            return []
+
+        # ── Score each candidate ──
         scored: list[tuple[float, Memory, Provenance]] = []
         for mem in candidates:
             score, prov = self._scorer.score(mem, text, context)
             scored.append((score, mem, prov))
 
-        # Top-k
+        # ── Top-k ──
         scored.sort(key=lambda triple: triple[0], reverse=True)
         top = scored[:k]
 
-        # Convert to hits + bump access counters
+        # ── Build hits + touch each tier ──
         hits: list[Hit] = []
         for score, mem, prov in top:
-            updated = Memory(
-                id=mem.id,
-                text=mem.text,
-                embedding_ref=mem.embedding_ref,
-                context=mem.context,
-                tier=mem.tier,
-                created_at=mem.created_at,
-                last_touch=datetime.now(UTC),
-                access_count=mem.access_count + 1,
-                is_consolidated=mem.is_consolidated,
-            )
-
-            # Write back to the tier the memory currently lives in.
-            # Also touch() L1 so it survives the next eviction round.
+            # Touch in whichever tier the memory currently lives so it
+            # survives the next eviction round.
             if mem.tier == Tier.L1:
-                # Re-insert into L1 will update + move-to-back (handled by
-                # L1WorkingContext). No L2 cascade expected here (we just
-                # took it out of L1, so room exists).
-                self._l1.insert(updated)
+                self._l1.touch(mem.id)
             elif mem.tier == Tier.L2:
-                self._l2[mem.id] = updated
-            else:
-                self._l3[mem.id] = updated
+                self._l2.touch(mem.id)
+            # L3: no touch needed (stub has no eviction)
 
             hits.append(
                 Hit(
@@ -339,7 +468,7 @@ class MemoryManager:
     # ── Tier movement (daemons mostly) ────────────────────────────────────────
 
     def promote(self, memory_id: MemoryId) -> None:
-        """Hint: warm this memory up. L3→L2, or L2→L1.
+        """warm this memory up. L3→L2, or L2→L1.
 
         Used by the prefetcher when it speculatively pulls memories in.
         No-op if the memory is already in L1.
@@ -353,22 +482,28 @@ class MemoryManager:
         if new_tier == mem.tier:
             return
 
-        # Remove from current tier, place into new tier.
+        old_tier = mem.tier
+        # Remove from current tier, update tier metadata, place into new tier.
         self._remove_from_any_tier(memory_id)
         promoted = self._with_tier(mem, new_tier)
-        evicted_from_l1 = self._put_in_tier(promoted, new_tier)
+        evicted = self._put_in_tier(promoted, new_tier)
 
-        # Cascade any L1 evictions that resulted from the promotion.
-        for ev in evicted_from_l1:
-            demoted = self._with_tier(ev, Tier.L2)
-            self._l2[ev.id] = demoted
-            self._demotions_24h += 1
+        # Cascade any evictions resulting from the promotion.
+        # L2 evictions go to L3. L1 evictions go through L2 (potentially
+        # generating more L3 cascade).
+        if new_tier == Tier.L1:
+            for ev in evicted:
+                l2_evicted = self._put_in_l2(ev)
+                self._demotions_24h += 1
+                self._cascade_to_l3(l2_evicted)
+        elif new_tier == Tier.L2:
+            self._cascade_to_l3(evicted)
 
         self._promotions_24h += 1
-        logger.trace(f"promote {memory_id} {mem.tier.value}->{new_tier.value}")
+        logger.trace(f"promote {memory_id} {old_tier.value}->{new_tier.value}")
 
     def demote(self, memory_id: MemoryId) -> None:
-        """Hint: cool this memory off. L1→L2, or L2→L3.
+        """cool this memory off. L1→L2, or L2→L3.
 
         Used by the pruner when an L2 memory has gone cold (14 days
         no access) or when L2 hits its capacity ceiling.
@@ -382,11 +517,14 @@ class MemoryManager:
         if new_tier == mem.tier:
             return
 
+        old_tier = mem.tier
         self._remove_from_any_tier(memory_id)
         demoted = self._with_tier(mem, new_tier)
-        self._put_in_tier(demoted, new_tier)
+        evicted = self._put_in_tier(demoted, new_tier)
+        if new_tier == Tier.L2:
+            self._cascade_to_l3(evicted)
         self._demotions_24h += 1
-        logger.trace(f"demote {memory_id} {mem.tier.value}->{new_tier.value}")
+        logger.trace(f"demote {memory_id} {old_tier.value}->{new_tier.value}")
 
     def forget(self, memory_id: MemoryId) -> bool:
         """Hard delete. Returns True if it existed.
@@ -405,22 +543,22 @@ class MemoryManager:
         Powers the Streamlit dashboard.
         """
         l1_stats = self._l1.stats()
+        l2_stats = self._l2.stats()
 
-        # Stub L2/L3 byte estimates — same crude formula as before.
-        l2_bytes = sum(len(m.text.encode("utf-8")) + 1536 for m in self._l2.values())
+        # Stub L3 byte estimate
         l3_bytes = sum(len(m.text.encode("utf-8")) + 1536 for m in self._l3.values())
 
         hit_rate = self._hits_24h / max(self._queries_24h, 1)
 
         return TierStats(
             l1_count=l1_stats.count,
-            l2_count=len(self._l2),
+            l2_count=l2_stats.count,
             l3_count=len(self._l3),
             l1_bytes=l1_stats.bytes_used,
-            l2_bytes=l2_bytes,
+            l2_bytes=l2_stats.bytes_estimate,
             l3_bytes=l3_bytes,
             l1_capacity_bytes=l1_stats.capacity_bytes,
-            l2_capacity_bytes=self._l2_cap,
+            l2_capacity_bytes=l2_stats.capacity_bytes,
             l3_capacity_bytes=self._l3_cap,
             queries_24h=self._queries_24h,
             hit_rate_24h=hit_rate,
