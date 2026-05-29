@@ -208,6 +208,24 @@ class TestTierOrdering:
         hits = mgr.query("mem", ctx_evening_swiggy, k=10, min_tier=Tier.L3)
         assert len(hits) == 3
 
+    def test_query_never_returns_duplicate_memory_ids(self, tmp_path):
+        """A memory must never appear twice in query results, regardless of
+        how many retrieval paths surface it (over-fetch, multi-tier, etc.)."""
+        mgr = MemoryManager(data_dir=tmp_path / "np")
+        ctx = ContextTags.now()
+
+        # Spread memories across all tiers
+        mgr.insert("hot memory one", ctx, tier=Tier.L1)
+        mgr.insert("warm memory two", ctx, tier=Tier.L2)
+        mgr.insert("cold memory three", ctx, tier=Tier.L3)
+
+        hits = mgr.query("memory", ctx, k=10, min_tier=Tier.L3)
+        ids = [h.memory_id for h in hits]
+        assert len(ids) == len(set(ids)), (
+            f"Duplicate memory_ids in query results: {ids}"
+        )
+        mgr.close()
+
 
 # ── Stats ─────────────────────────────────────────────────────────────────────
 

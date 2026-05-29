@@ -351,17 +351,35 @@ class MemoryManager:
 
         if Tier.L1.rank >= min_tier.rank:
             candidates.extend(iter(self._l1))
-
-        # L2 + L3 share the embedder call. Do it once.
+        # L2 + L3 share the query embedding. Compute it once, using the
+        # query-side encoding when the embedder supports it (bge is
+        # asymmetric: queries get an instruction prefix, passages don't).
         query_embedding: np.ndarray | None = None
+
+        def _embed_query_side(q: str) -> np.ndarray:
+            # Prefer embed_query() if the embedder provides it; fall back to
+            # embed() for stubs / symmetric embedders. Keeps the stub working.
+            embed_query = getattr(self._embedder, "embed_query", None)
+            if callable(embed_query):
+                return embed_query(q)
+            return self._embedder.embed(q)
 
         if Tier.L2.rank >= min_tier.rank and len(self._l2) > 0:
             try:
-                query_embedding = self._embedder.embed(text)
+                query_embedding = _embed_query_side(text)
                 l2_hits = self._l2.query(query_embedding, k=max(k * 4, k))
                 candidates.extend(mem for mem, _dist in l2_hits)
             except Exception as e:  # noqa: BLE001
                 logger.warning(f"L2 ANN query failed: {e}")
+
+        if Tier.L3.rank >= min_tier.rank and len(self._l3) > 0:
+            try:
+                if query_embedding is None:
+                    query_embedding = _embed_query_side(text)
+                l3_hits = self._l3.query(query_embedding, k=max(k * 4, k))
+                candidates.extend(mem for mem, _dist in l3_hits)
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"L3 ANN query failed: {e}")
 
         if Tier.L3.rank >= min_tier.rank and len(self._l3) > 0:
             try:
@@ -375,9 +393,23 @@ class MemoryManager:
         if not candidates:
             return []
 
+        # Deduplicate by memory_id. A memory can surface through more than
+        # one path — e.g. an over-fetched HNSW query (k*4) on a small corpus
+        # can return the same label more than once, or a memory could appear
+        # in two tiers transiently during a cascade. A query must never
+        # return the same memory twice. Keep first occurrence (hot-tier-first
+        # ordering means we keep the warmest copy).
+        seen_ids: set[MemoryId] = set()
+        unique_candidates: list[Memory] = []
+        for mem in candidates:
+            if mem.id in seen_ids:
+                continue
+            seen_ids.add(mem.id)
+            unique_candidates.append(mem)
+
         # Score
         scored: list[tuple[float, Memory, Provenance]] = []
-        for mem in candidates:
+        for mem in unique_candidates:
             score, prov = self._scorer.score(mem, text, context)
             scored.append((score, mem, prov))
 
