@@ -221,9 +221,7 @@ class TestTierOrdering:
 
         hits = mgr.query("memory", ctx, k=10, min_tier=Tier.L3)
         ids = [h.memory_id for h in hits]
-        assert len(ids) == len(set(ids)), (
-            f"Duplicate memory_ids in query results: {ids}"
-        )
+        assert len(ids) == len(set(ids)), f"Duplicate memory_ids in query results: {ids}"
         mgr.close()
 
 
