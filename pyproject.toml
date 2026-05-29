@@ -47,6 +47,8 @@ dev = [
     "pytest>=8.0",
     "pytest-cov>=4.1",
     "pytest-asyncio>=0.23",
+    "pytest-timeout>=2.4.0",
+    "hypothesis>=6.155.0",
     "ruff>=0.4",
     "mypy>=1.9",
     "ipython>=8.20",
@@ -85,8 +87,4 @@ addopts = "-v --tb=short"
 timeout = 120
 timeout_method = "thread"
 
-[dependency-groups]
-dev = [
-    "hypothesis>=6.155.0",
-    "pytest-timeout>=2.4.0",
-]
+
