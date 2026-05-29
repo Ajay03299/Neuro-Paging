@@ -28,6 +28,10 @@ Threading bugs are non-deterministic by nature — a test might pass
   - Using barriers so threads all start at the same instant
   - Repeating critical assertions across multiple iterations where possible
   - Asserting INVARIANTS (sums, counts) not exact values
+
+Every test runs under the global pytest timeout (see pyproject.toml:
+timeout=120, timeout_method=thread) so a regression that reintroduces
+a deadlock fails fast instead of hanging CI forever.
 """
 
 from __future__ import annotations
@@ -108,9 +112,12 @@ class TestL1Concurrency:
             return count
 
         with ThreadPoolExecutor(max_workers=n_threads) as pool:
-            results = [
-                f.result() for f in as_completed(pool.submit(worker, t) for t in range(n_threads))
-            ]
+            # Submit ALL workers first (materialise the list) so every thread
+            # reaches the barrier. Passing a lazy generator to as_completed
+            # could start blocking before all threads are submitted, and the
+            # barrier would never fill — a deadlock.
+            futures = [pool.submit(worker, t) for t in range(n_threads)]
+            results = [f.result() for f in as_completed(futures)]
 
         # Every thread should report all ops done
         assert sum(results) == n_threads * ops_per_thread
@@ -134,7 +141,8 @@ class TestL1Concurrency:
                 l1.touch("shared")
 
         with ThreadPoolExecutor(max_workers=n_threads) as pool:
-            list(as_completed(pool.submit(worker) for _ in range(n_threads)))
+            futures = [pool.submit(worker) for _ in range(n_threads)]
+            list(as_completed(futures))
 
         # The access_count is incremented by touch(). If concurrent touches
         # raced, we'd see a count < n_threads * touches_per_thread.
@@ -159,7 +167,8 @@ class TestL1Concurrency:
                 l1.insert(mem)
 
         with ThreadPoolExecutor(max_workers=n_threads) as pool:
-            list(as_completed(pool.submit(worker, t) for t in range(n_threads)))
+            futures = [pool.submit(worker, t) for t in range(n_threads)]
+            list(as_completed(futures))
 
         # The invariant: bytes_used <= capacity_bytes, ALWAYS.
         stats = l1.stats()
@@ -197,9 +206,10 @@ class TestL2Concurrency:
             return ops_per_thread
 
         with ThreadPoolExecutor(max_workers=n_threads) as pool:
-            results = [
-                f.result() for f in as_completed(pool.submit(worker, t) for t in range(n_threads))
-            ]
+            # Materialise submissions before as_completed (see note above —
+            # lazy generator + barrier = potential deadlock).
+            futures = [pool.submit(worker, t) for t in range(n_threads)]
+            results = [f.result() for f in as_completed(futures)]
 
         assert sum(results) == n_threads * ops_per_thread
 
@@ -242,7 +252,8 @@ class TestL2Concurrency:
                 l2.insert(mem, vec)
 
         with ThreadPoolExecutor(max_workers=n_threads) as pool:
-            list(as_completed(pool.submit(worker, t) for t in range(n_threads)))
+            futures = [pool.submit(worker, t) for t in range(n_threads)]
+            list(as_completed(futures))
 
         # Collect all labels — they must all be unique
         with l2._metadata._lock:
@@ -355,7 +366,8 @@ class TestL3Concurrency:
                 )
 
         with ThreadPoolExecutor(max_workers=n_threads) as pool:
-            list(as_completed(pool.submit(worker, t) for t in range(n_threads)))
+            futures = [pool.submit(worker, t) for t in range(n_threads)]
+            list(as_completed(futures))
 
         assert len(l3) == n_threads * ops_per_thread
         l3.close()
@@ -395,12 +407,18 @@ class TestManagerConcurrency:
                 mgr.insert(f"l3 {i}", ContextTags.now(), tier=Tier.L3)
             return n_per_tier
 
+        # CRITICAL: submit ALL futures FIRST so all three threads start and
+        # reach the barrier. Calling .result() inline would block the main
+        # thread on the first future before the other two are submitted, and
+        # the 3-party barrier would never be satisfied — a self-inflicted
+        # deadlock.
         with ThreadPoolExecutor(max_workers=3) as pool:
-            results = [
-                pool.submit(insert_l1).result(),
-                pool.submit(insert_l2).result(),
-                pool.submit(insert_l3).result(),
+            futures = [
+                pool.submit(insert_l1),
+                pool.submit(insert_l2),
+                pool.submit(insert_l3),
             ]
+            results = [f.result() for f in futures]
 
         assert sum(results) == 3 * n_per_tier
 
