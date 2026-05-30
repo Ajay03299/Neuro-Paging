@@ -94,3 +94,6 @@ secrets/
 eval/data/
 eval/results/
 demo-memory/
+
+# Runtime data dirs (MemoryManager default + demos)
+.neuro-paging/
