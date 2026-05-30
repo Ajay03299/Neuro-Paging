@@ -18,6 +18,7 @@ from neuro_paging.memory import (
     Tier,
     TierStats,
 )
+from neuro_paging.pipeline import AssembledContext, MemoryAgent
 
 __version__ = "0.1.0"
 __author__ = "Ajay Javali, Christine R"
@@ -38,4 +39,6 @@ __all__ = [
     "Tier",
     "TierStats",
     "TimeBucket",
+    "AssembledContext",
+    "MemoryAgent",
 ]
