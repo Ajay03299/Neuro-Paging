@@ -90,3 +90,7 @@ bench/results/local/
 *.key
 *.pem
 secrets/
+# Eval datasets (downloaded, not committed)
+eval/data/
+eval/results/
+demo-memory/
