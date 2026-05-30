@@ -6,7 +6,7 @@ a model. Each scoring term is tested in isolation, then the combined score.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import numpy as np
 import pytest
@@ -14,7 +14,6 @@ import pytest
 from neuro_paging import ContextTags, TimeBucket
 from neuro_paging.memory.types import Memory, MemoryId, Tier
 from neuro_paging.routing.scorer import ContextAwareScorer, ScorerWeights
-
 
 # ── A tiny deterministic embedder for tests (no network) ─────────────────────
 
@@ -45,7 +44,7 @@ def _make_memory(
     access_count: int = 0,
     last_touch: datetime | None = None,
 ) -> Memory:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     ctx = ContextTags.now(
         time_bucket=time_bucket,
         location=location,
@@ -146,8 +145,8 @@ class TestContextTerm:
         )
         mem = _make_memory(
             time_bucket=TimeBucket.MORNING,  # match
-            location="home",                 # mismatch
-            foreground_app="VSCode",          # match
+            location="home",  # mismatch
+            foreground_app="VSCode",  # match
         )
         sim = scorer._context_term(mem, ctx)
         assert 0.0 < sim < 1.0
@@ -159,18 +158,12 @@ class TestContextTerm:
 class TestFrequencyTerm:
     def test_recent_frequent_scores_higher_than_stale_rare(self):
         scorer = ContextAwareScorer(embedder=_StubEmbedder())
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
-        recent_frequent = _make_memory(
-            access_count=20, last_touch=now
-        )
-        stale_rare = _make_memory(
-            access_count=1, last_touch=now - timedelta(days=30)
-        )
+        recent_frequent = _make_memory(access_count=20, last_touch=now)
+        stale_rare = _make_memory(access_count=1, last_touch=now - timedelta(days=30))
 
-        assert scorer._frequency_term(recent_frequent) > scorer._frequency_term(
-            stale_rare
-        )
+        assert scorer._frequency_term(recent_frequent) > scorer._frequency_term(stale_rare)
 
     def test_zero_access_never_touched_is_low(self):
         scorer = ContextAwareScorer(embedder=_StubEmbedder())
@@ -180,11 +173,9 @@ class TestFrequencyTerm:
 
     def test_decay_reduces_score_over_time(self):
         scorer = ContextAwareScorer(embedder=_StubEmbedder())
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         fresh = _make_memory(access_count=10, last_touch=now)
-        old = _make_memory(
-            access_count=10, last_touch=now - timedelta(days=14)
-        )
+        old = _make_memory(access_count=10, last_touch=now - timedelta(days=14))
         assert scorer._frequency_term(fresh) > scorer._frequency_term(old)
 
 
@@ -212,7 +203,7 @@ class TestCombinedScore:
         one matching neither."""
         emb = _StubEmbedder()
         scorer = ContextAwareScorer(embedder=emb)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         ctx = ContextTags.now(
             time_bucket=TimeBucket.MORNING,
             foreground_app="VSCode",

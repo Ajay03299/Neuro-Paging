@@ -34,12 +34,12 @@ from __future__ import annotations
 import math
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import numpy as np
 
 from neuro_paging.context.types import ContextTags
-from neuro_paging.memory.types import Memory, Provenance, Tier
+from neuro_paging.memory.types import Memory, Provenance
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,7 +54,7 @@ class ScorerWeights:
     """
 
     alpha: float = 0.60  # semantic similarity
-    beta: float = 0.25   # context match
+    beta: float = 0.25  # context match
     gamma: float = 0.15  # frequency × recency decay
 
     def __post_init__(self) -> None:
@@ -159,9 +159,7 @@ class ContextAwareScorer:
 
         # Foreground app match (only if both known)
         if mem_ctx.foreground_app is not None and ctx.foreground_app is not None:
-            components.append(
-                1.0 if mem_ctx.foreground_app == ctx.foreground_app else 0.0
-            )
+            components.append(1.0 if mem_ctx.foreground_app == ctx.foreground_app else 0.0)
 
         # Location match (only if both known)
         if mem_ctx.location is not None and ctx.location is not None:
@@ -191,10 +189,10 @@ class ContextAwareScorer:
         well-used memory approaches but doesn't blow past 1.0.
         """
         # Recency decay
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         last = memory.last_touch
         if last.tzinfo is None:
-            last = last.replace(tzinfo=timezone.utc)
+            last = last.replace(tzinfo=UTC)
         delta_seconds = max(0.0, (now - last).total_seconds())
         decay = math.exp(-delta_seconds / self._half_life)
 
