@@ -40,6 +40,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
+import tempfile
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -107,16 +109,14 @@ def _turn_text(turn: dict) -> str:
 
 
 def _eval_question(q: dict, max_k: int) -> QuestionResult:
-    """Run one question end-to-end: store its turns, query, record top-k sessions.
-
-    A fresh in-memory agent per question (a clean index per question is the
-    standard protocol — no cross-question contamination).
-    """
     embedder = BGESmallEmbedder()
     scorer = ContextAwareScorer(embedder=embedder)
-    # In-memory: use a unique temp dir per question via None data_dir behaviour.
-    agent = MemoryAgent(data_dir=None, embedder=embedder, scorer=scorer)
-
+    # A unique throwaway dir per question — a CLEAN index per question is the
+    # standard protocol. data_dir=None falls back to a shared default dir,
+    # which would accumulate every question's memories into one contaminated
+    # store, so we make isolation explicit.
+    qdir = tempfile.mkdtemp(prefix="lme_")
+    agent = MemoryAgent(data_dir=qdir, embedder=embedder, scorer=scorer)
     ctx = ContextTags.now()
 
     sessions = q["haystack_sessions"]
@@ -156,6 +156,7 @@ def _eval_question(q: dict, max_k: int) -> QuestionResult:
         retrieved_at_k[k] = topk
 
     agent.close()
+    shutil.rmtree(qdir, ignore_errors=True)
 
     return QuestionResult(
         question_id=q["question_id"],
@@ -169,8 +170,11 @@ def run_eval(split: str, limit: int | None = None) -> EvalReport:
     path = _download_split(split)
     with open(path) as f:
         data = json.load(f)
-    if limit is not None:
-        data = data[:limit]
+    if limit is not None and limit < len(data):
+        # Stride-sample across the full set so all question types are
+        # represented, not just the first N (the data is grouped by type).
+        step = len(data) / limit
+        data = [data[int(i * step)] for i in range(limit)]
 
     max_k = max(_K_VALUES)
     results: list[QuestionResult] = []
