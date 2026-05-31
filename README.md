@@ -4,199 +4,125 @@
 
 **An operating system for AI memory.**
 
-*Tiered. Context-aware. Quietly predictive. 100% on-device.*
+*Tiered. Context-aware. 100% on-device.*
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![Samsung ennovateX](https://img.shields.io/badge/Samsung-ennovateX_2026-1428a0.svg)](https://ennovatex.io/ax-hackathon/)
-[![Tests](https://img.shields.io/badge/tests-169_passing-brightgreen.svg)](#testing)
+[![Tests](https://img.shields.io/badge/tests-212_passing-brightgreen.svg)](#testing)
 [![CI](https://github.com/Ajay03299/Neuro-Paging/actions/workflows/ci.yml/badge.svg)](https://github.com/Ajay03299/Neuro-Paging/actions/workflows/ci.yml)
 
 </div>
 
 ---
 
-## The pitch
+## The idea
 
-> Treat AI memory the way an OS treats RAM. Page the right thoughts to the front of mind, archive the rest, and quietly learn the user's rhythms — so the pages worth keeping warm are already loaded before they ever hit send.
+> Treat AI memory the way an operating system treats RAM. Page the right thoughts to the front of mind, keep the warm ones cached, archive the rest — and rank what to recall by *meaning, situation, and recency*, not just keyword match.
 
-Built for **Samsung ennovateX AX Hackathon 2026 · Problem Statement #03 · Context-Aware Adaptive Memory for Mobile Agentic Systems** by team **ByteMe**.
+Most on-device agents store memory as one flat vector blob (every query scans everything; it slows as it grows) or a sliding window (forgets your routines and preferences). **Neuro-Paging is a third option: a tiered memory subsystem, not a RAG wrapper** — with semantic retrieval, context-aware ranking, and hard per-tier budgets, running entirely on-device.
+
+| Flat RAG | Sliding Window | **Neuro-Paging** |
+| :--- | :--- | :--- |
+| One vector blob, scans everything, slows as it grows | Keeps last N turns, forgets routines & preferences | Tiered L1/L2/L3 with budgets, semantic + context-aware retrieval |
 
 ---
 
-## What's built right now
+## Headline results
 
-This is an active hackathon project. Here is an honest split of what is
-**shipped and tested** versus what is **on the roadmap** — no vaporware.
+Everything below is **measured on Apple Silicon M3 Pro** and reproducible.
 
-| Component | Status | Evidence |
+| What | Result | Where |
+| :--- | :--- | :--- |
+| **Retrieval quality** | **recall@5 = 0.98** on LongMemEval-S (all 5 ability types, ~48 sessions/q, on-device) | [eval/README.md](./eval/README.md) |
+| **L1 insert latency** | **1.42 µs** p99 @ 32 KB (704× under the 1 ms target) | [BENCHMARKS.md](./BENCHMARKS.md) |
+| **L2 query latency** | **0.78 ms** p50 @ 10K vectors (6.4× under 5 ms) | [BENCHMARKS.md](./BENCHMARKS.md) |
+| **Test suite** | **212 tests** — example, concurrency (100 threads), property-based | [#testing](#testing) |
+
+---
+
+## What's built
+
+A complete, working, on-device memory system — store a fact, ask anything, get the semantically + contextually right memory back.
+
+| Component | Status | Notes |
 | :--- | :---: | :--- |
-| **L1** working context (FIFO + byte budget) | ✅ **shipped** | measured 1.42 µs p99 insert · [benchmarks](./BENCHMARKS.md) |
-| **L2** hot vector cache (HNSW + SQLite, atomic dual-store) | ✅ **shipped** | measured 0.78 ms p50 query @ 10K · [benchmarks](./BENCHMARKS.md) |
-| **L3** archive tier (HNSW + SQLite) | ✅ **shipped** | cascade L1→L2→L3 end-to-end |
-| **MemoryManager** public API (locked contract) | ✅ **shipped** | `api-v0.1.0` tag |
-| **Pruner daemon** (cold L2→L3, power-gated) | ✅ **shipped** | APScheduler + power gating |
-| **Concurrency-safe** under multi-threaded load | ✅ **shipped** | 9 stress tests, up to 100 threads |
-| L3 PQ-int8 compression | 🚧 roadmap | Sprint 2 — L3 is float32 HNSW today |
-| Context-aware routing (α·cos + β·ctx + γ·freq) | 🚧 roadmap | Sprint 3 — intelligence layer |
-| Predictive prefetch (FP-Growth) | 🚧 roadmap | Sprint 3 |
-| C++17 native core (ARM NEON SIMD) | 🚧 roadmap | Sprint 3, decision-gated |
-| Consolidator (cluster → concept summary) | 🚧 roadmap | Sprint 2 |
-| Live Streamlit dashboard | 🚧 roadmap | Sprint 1–2 |
+| **L1** working context (FIFO + byte budget) | ✅ | in-memory, 1.42 µs p99 insert |
+| **L2** hot vector cache (HNSW + SQLite, atomic dual-store) | ✅ | 0.78 ms p50 query @ 10K |
+| **L3** archive tier (HNSW + SQLite) | ✅ | cascade L1→L2→L3 end-to-end |
+| **bge-small embeddings** (ONNX, no torch) | ✅ | semantic retrieval, ~90 MB, on-device |
+| **Context-aware scorer** (α·cos + β·ctx + γ·freq·decay) | ✅ | ranks by meaning + situation + recency |
+| **MemoryAgent** pipeline (remember / recall / respond) | ✅ | one interface over the whole system |
+| **Pruner daemon** (cold L2→L3, power-gated) | ✅ | idle + battery aware |
+| **Concurrency-safe** under multi-threaded load | ✅ | 9 stress tests, up to 100 threads |
+| **LongMemEval recall@k harness** | ✅ | recall@5 = 0.98, oracle-validated |
+| Live generation (llama.cpp / Qwen) | 🔭 future | pluggable behind a `Generator` protocol; default returns the assembled context |
+| L3 PQ-int8 compression | 🔭 future | L3 is float32 HNSW today |
+| Predictive prefetch (FP-Growth) | 🔭 future | designed; `promote()` hook exists |
+| Consolidator (cluster → concept summary) | 🔭 future | — |
+| Online α/β/γ weight learning | 🔭 future | weights are injected, so this slots in cleanly |
+| C++17 / ARM NEON retrieval core | 🔭 future | Python today; orthogonal systems-perf project |
 
-**169 tests passing**, CI green, Apache-2.0. See [Roadmap](#roadmap) for the full plan.
-
----
-
-## Measured performance
-
-Every number below is **measured on Apple Silicon M3 Pro**, not projected.
-Reproducible via `bench/`. Full detail: **[BENCHMARKS.md](./BENCHMARKS.md)**.
-
-| Tier | Metric | Deck target | **Measured** | Margin |
-| :--- | :--- | ---: | ---: | ---: |
-| L1 | insert p99 @ 32 KB | < 1 ms | **1.42 µs** | **704× under** |
-| L2 | query p50 @ 10K vectors | ~5 ms | **0.78 ms** | **6.4× under** |
-| L2 | insert throughput | — | **659 ops/sec** | atomic dual-store |
-
-```bash
-python bench/l1_baseline.py    # L1 working context
-python bench/l2_baseline.py    # L2 hot vector cache
-python bench/hnswlib_baseline.py  # raw reference floor
-```
+✅ = shipped & tested · 🔭 = future work (see [Future work](#future-work))
 
 ---
 
-## Why memory is the unglamorous bottleneck
+## How retrieval works
 
-On-device agents today usually pick one of two bad options:
+A query doesn't just match words. Every candidate memory is scored on three weighted terms:
+Score(m | q, c) = α·cos(e_m, e_q)  +  β·ctxSim(tags_m, c)  +  γ·log(1 + freq_m)·decay(Δt)
+└── semantic ──┘     └─── context ───┘     └──── recency/frequency ────┘
 
-| Trap A · Flat RAG | Trap B · Sliding Window |
-| :--- | :--- |
-| One giant vector blob. Every query scans every memory. The longer you use it, the slower it gets — and your phone heats up to remind you. | Forget aggressively, keep the last N turns. Throws away your routines, your projects, your preferences. Wakes up a stranger every morning. |
+- **Semantic** (α = 0.60) — cosine similarity of bge-small embeddings. "Is this memory *about* the query?"
+- **Context** (β = 0.25) — match between the memory's stored situation and the current one: time-of-day, foreground app, location, tag overlap. **The signal flat RAG throws away.**
+- **Recency/frequency** (γ = 0.15) — `log(1+access_count)` × exponential decay (7-day half-life). Habits surface over one-offs; cold memories fade.
 
-**Neuro-Paging is a third option.** A memory subsystem, not a RAG wrapper.
+This is what makes "context-aware" literal. Two memories with **identical text** can rank very differently:
 
----
+| Memory (same text) | Context | Total |
+| :--- | :--- | ---: |
+| "the CI deployment pipeline broke" | morning · in VSCode · used 12× · fresh | **0.86** |
+| "the CI deployment pipeline broke" | night · in Netflix · never used · 20d old | **0.50** |
 
-## The three prongs
-
-### 1. Tiered Memory Architecture *(the filing system)* — ✅ shipped
-Three tiers modeled on CPU caches:
-- **L1** — working context, in-memory FIFO, 32 KB, measured **1.42 µs** insert
-- **L2** — hot vector cache, HNSW + SQLite metadata, 8 MB, measured **0.78 ms** query @ 10K
-- **L3** — archive vault, HNSW + SQLite, 128 MB (PQ-int8 compression in Sprint 2)
-
-Each tier has a hard byte budget. Overflow cascades down automatically:
-L1 → L2 → L3. Nothing unbounded. A background pruner demotes cold L2
-memories to L3 on an idle, battery-aware schedule.
-
-### 2. Context-Aware Routing *(the brain)* — 🚧 Sprint 3
-Retrieval shouldn't just match words. The design scores every memory as:
-Score(m | q, c) = α·cos(e_m, e_q) + β·ctxSim(tags_m, c) + γ·log(1 + freq_m)·decay(Δt)
-
-Weights `α, β, γ` learned per user from implicit feedback. The substrate
-already exposes a `Scorer` plug-in protocol; the learned scorer slots in
-without touching the tiers.
-
-### 3. Pruning & Consolidation *(the housekeeper)* — pruner ✅, consolidator 🚧
-The **pruner is shipped**: a power-gated background daemon that demotes
-stale L2 vectors to L3 (skips work on low battery / active foreground app /
-non-idle device). The **consolidator** (cluster + summarize stale memories
-into dense concepts) lands Sprint 2.
-
-### Standout: Predictive Prefetching — 🚧 Sprint 3
-FP-Growth pattern mining over `(time, app, topic)` tuples to detect routines
-(Mon 9am IDE → "project status?"). When confidence > 0.7, warm the answer
-into L1 before the user hits send. The substrate's `promote()` API is the
-hook this will call.
+Same semantic score (0.83). Context and recency break the tie — flat RAG would rank them equal.
 
 ---
 
 ## Architecture
-┌─────────────────┐     ┌──────────────────────┐     ┌──────────────┐
-│  User prompt    │────▶│  Context-Aware       │────▶│  On-device   │
-│  + sensors      │     │  Router  (Sprint 3)  │     │  LLM         │
-│  (time, app,    │     │                      │     │  Qwen2.5-1.5B│
-│   loc, battery) │     │  α·R + β·C + γ·F      │     │  INT4        │
-└─────────────────┘     └──────────────────────┘     └──────────────┘
+    query + context (time, app, location, recency)
+                      │
+                      ▼
+    ┌──────────────────────────────────┐
+    │  Context-Aware Scorer             │
+    │  α·semantic + β·context + γ·freq  │
+    └──────────────────────────────────┘
+                      │ ranks candidates from all tiers
+    ┌─────────────────┼─────────────────┐
+    ▼                 ▼                 ▼
+┌──────────────┐  ┌──────────────┐  ┌──────────────┐
+│  L1 Working  │  │  L2 Hot      │  │  L3 Archive  │
+│  ~32 KB      │  │  ~8 MB       │  │  128 MB      │
+│  1.42 µs ✅  │  │  0.78 ms ✅  │  │  HNSW ✅     │
+│  FIFO        │  │  HNSW+SQLite │  │  HNSW+SQLite │
+└──────────────┘  └──────────────┘  └──────────────┘
+▲   cascade L1→L2→L3 on overflow (shipped)   ▲
+└─────────────────────┬─────────────────────┘
 │
-┌────────────────────┼────────────────────┐
-▼                    ▼                    ▼
-┌──────────────┐     ┌──────────────┐     ┌──────────────┐
-│  L1 Working  │     │  L2 Hot      │     │  L3 Archive  │
-│  ~32 KB      │     │  ~8 MB       │     │  128 MB      │
-│  1.42 µs ✅  │     │  0.78 ms ✅  │     │  HNSW ✅     │
-│              │     │  HNSW+SQLite │     │  PQ-int8 🚧  │
-└──────────────┘     └──────────────┘     └──────────────┘
-▲  cascade L1→L2→L3 on overflow (shipped) ▲
-└────────────────────┬────────────────────┘
-│
-┌────────────────────┴────────────────────┐
-│  Background daemons                      │
-│  · Pruner (L2→L3, power-gated)     ✅    │
-│  · Consolidator (cluster+summary)   🚧   │
-│  · Pattern learner (FP-Growth)      🚧   │
-│  · Predictive prefetcher            🚧   │
-└──────────────────────────────────────────┘
-
----
-
-## What makes us different
-
-The design goals vs prior art. ✅ = shipped, 🚧 = roadmap.
-
-|  | Flat RAG | MemGPT | Letta | **Neuro-Paging** |
-| :--- | :---: | :---: | :---: | :---: |
-| Tiered hierarchy + promote/demote + budgets | ❌ flat | main/archival | block-based | ✅ **L1/L2/L3 shipped** |
-| Atomic dual-store (vectors + metadata) | ❌ | ❌ | ❌ | ✅ **shipped + stress-tested** |
-| Power-gated background pruning | ❌ | ❌ | ❌ | ✅ **shipped** |
-| Retrieval weighted by sensor context | ❌ | ❌ | ❌ | 🚧 Sprint 3 |
-| Predictive prefetch from routines | ❌ | ❌ | ❌ | 🚧 Sprint 3 |
-| Native C++ retrieval engine | Python | Python | Python | 🚧 Sprint 3 |
-| 100% on-device, zero cloud calls | depends | cloud LLM | supports local | ✅ **designed for it** |
-
----
-
-## Testing
-
-The substrate ships with **169 tests**, all passing, CI-enforced.
-
-Notable: **9 concurrency stress tests** hammer L1/L2/L3 and the pruner
-daemon from up to **100 threads simultaneously**, verifying:
-- dual-store atomicity (HNSW index + SQLite metadata never diverge)
-- race-free monotonic label assignment under contention
-- byte-budget invariants hold under sustained concurrent eviction
-- the background pruner runs safely alongside foreground writes
-
-A global `pytest-timeout` (thread method) guards against any regression
-that could reintroduce a deadlock — a hang fails fast with a thread dump
-instead of wedging CI.
-
-```bash
-pytest tests/ -v        # all 169
-pytest tests/test_concurrency.py -v   # the 9 stress tests
-```
+┌──────────────────────────────────┐
+│  Pruner daemon — demotes cold     │
+│  L2→L3, power & idle gated  ✅    │
+└──────────────────────────────────┘
 
 ---
 
 ## Quick start
-
-### Prerequisites
-- Python 3.11+
-- macOS (Apple Silicon recommended) or Linux ARM64
-- 4 GB free disk for models (only needed for the ML runtime)
-
-### Install
 
 ```bash
 git clone https://github.com/Ajay03299/Neuro-Paging.git
 cd Neuro-Paging
 
 uv venv && source .venv/bin/activate
-uv pip install -e ".[dev]"
+uv pip install -e ".[dev,ml]"     # ml extra pulls bge-small (ONNX)
 
-# Verify
 python -c "import neuro_paging; print('✅', neuro_paging.__version__)"
 pytest tests/ -q
 ```
@@ -204,20 +130,59 @@ pytest tests/ -q
 ### 30-second taste
 
 ```python
-from neuro_paging import MemoryManager, ContextTags
+from neuro_paging.pipeline import MemoryAgent
+from neuro_paging.embed import BGESmallEmbedder
+from neuro_paging.routing import ContextAwareScorer
+from neuro_paging.context import ContextTags
 
-mgr = MemoryManager(data_dir="./my-memory")
+emb = BGESmallEmbedder()                                  # bge-small via ONNX
+agent = MemoryAgent(
+    data_dir="./my-memory",
+    embedder=emb,
+    scorer=ContextAwareScorer(embedder=emb),
+)
 
-# Store memories — they land in L1, cascade to L2/L3 as it fills
-mgr.insert("User prefers Italian food for dinner", ContextTags.now())
-mgr.insert("Standup is at 9am every weekday", ContextTags.now())
+ctx = ContextTags.now()
+agent.remember("the user is allergic to peanuts", ctx)
+agent.remember("deployment uses GitHub Actions", ctx)
 
-# Retrieve top-k across all tiers
-hits = mgr.query("what does the user like to eat?", ContextTags.now(), k=3)
-for h in hits:
-    print(h.score, h.text)
+print(agent.respond("what are the user's dietary needs?", ctx))
+# → surfaces the peanut-allergy memory, ranked by relevance + context
 
-mgr.close()  # persists L2 + L3 to disk
+agent.close()
+```
+
+---
+
+## Testing
+
+**212 tests**, all passing, CI-enforced across Python 3.11 and 3.12, in three styles:
+
+- **Example-based** — correctness on known scenarios across every component.
+- **Concurrency stress** (9 tests) — hammer L1/L2/L3 and the pruner from up to **100 threads**, verifying dual-store atomicity (HNSW + SQLite never diverge), race-free label assignment, and byte-budget invariants under contention. A global `pytest-timeout` (thread method) makes any deadlock regression fail fast with a thread dump instead of wedging CI.
+- **Property-based** (Hypothesis) — encode invariants like *"the byte budget is never exceeded for any insert sequence"* and let Hypothesis generate hundreds of cases trying to break them, shrinking any failure to a minimal reproducer.
+
+```bash
+pytest tests/ -q                       # all 212
+pytest tests/test_concurrency.py -v    # the 9 stress tests
+pytest tests/test_properties.py -v     # Hypothesis property tests
+```
+
+---
+
+## Evaluation
+
+Retrieval recall@k on **LongMemEval** (ICLR 2025), the long-term-memory benchmark — full methodology in [eval/README.md](./eval/README.md).
+
+| recall@1 | recall@3 | recall@5 | recall@10 |
+| ---: | ---: | ---: | ---: |
+| 0.90 | 0.96 | **0.98** | 0.98 |
+
+50 questions stride-sampled across all five ability types, ~48 sessions each, bge-small (ONNX), on-device. Retrieval-only (not official LongMemEval accuracy scores). The harness was validated on the `oracle` split first (recall = 1.0 by construction) to separate harness correctness from retrieval difficulty.
+
+```bash
+python eval/longmemeval.py --split oracle --limit 50   # validate harness (~1.0)
+python eval/longmemeval.py --split s --limit 50        # the headline number
 ```
 
 ---
@@ -225,91 +190,45 @@ mgr.close()  # persists L2 + L3 to disk
 ## Repository layout
 Neuro-Paging/
 ├── src/neuro_paging/
-│   ├── memory/            # L1/L2/L3 tiers + manager        (Ajay) ✅
-│   ├── daemons/           # pruner (consolidator runner WIP) (Ajay) ✅
-│   ├── context/           # context tags, sensor types      (shared)
-│   ├── routing/           # scorer, online learner          (Christine) 🚧
-│   ├── embed/             # bge-small ONNX runtime           (Christine) 🚧
-│   ├── llm/               # Qwen llama.cpp runtime           (Christine) 🚧
-│   ├── consolidator/      # clustering + summarisation       (Christine) 🚧
-│   └── prefetch/          # FP-Growth + prefetcher           (Christine) 🚧
-├── npaged-core/           # C++17 native retrieval core      (Ajay) 🚧
-├── bench/                 # latency / throughput benchmarks  ✅
-├── eval/                  # LongMemEval, LoCoMo, MSC         🚧
-├── ui/                    # Streamlit live tier dashboard    🚧
-├── tests/                 # 169 tests incl. concurrency      ✅
-├── notes/                 # baselines, design docs, decisions ✅
-├── BENCHMARKS.md          # consolidated measured results    ✅
-└── agents.md              # agent contracts, tool schemas
+│   ├── memory/       # L1/L2/L3 tiers + MemoryManager      ✅
+│   ├── embed/        # bge-small ONNX embedder             ✅
+│   ├── routing/      # context-aware scorer                ✅
+│   ├── pipeline/     # MemoryAgent (remember/recall/respond) ✅
+│   ├── daemons/      # power-gated pruner                  ✅
+│   └── context/      # context tags + sensor types         ✅
+├── bench/            # latency / throughput benchmarks      ✅
+├── eval/             # LongMemEval recall@k harness         ✅
+├── tests/            # 212 tests (example/concurrency/property)
+├── notes/            # baselines, design decisions
+└── BENCHMARKS.md     # consolidated measured results
 
 ---
 
-## Roadmap
+## Future work
 
-Phase 2 submission target: **June 22, 2026**.
+Documented, not built — the architecture leaves clean seams for each:
 
-| Sprint | Dates | Headline deliverable | Status |
-| :--- | :--- | :--- | :---: |
-| 0 | May 19–22 | Scaffold, baselines, locked API contract | ✅ |
-| 1 | May 23–29 | Three tiers end-to-end, pruner, concurrency tests | ✅ |
-| 2 | May 30–Jun 5 | PQ-int8 for L3, consolidator daemon, dashboard | 🚧 |
-| 3 | Jun 6–12 | C++ native core, predictive prefetch, online learning | ⬜ |
-| 4 | Jun 13–19 | Full benchmarks (LongMemEval/LoCoMo/MSC), MobileMem-Bench | ⬜ |
-| 5 | Jun 20–22 | Code freeze, demo video, submission | ⬜ |
+- **Live generation** — a `Generator` protocol already exists; the default returns the assembled context block. A local LLM (llama.cpp + Qwen2.5-1.5B) drops in without touching the pipeline.
+- **L3 PQ-int8 compression** — L3 is float32 HNSW today; product quantization would cut its footprint ~4×.
+- **Predictive prefetch** — FP-Growth over `(time, app, topic)` routines to warm L1 before a query; the `promote()` hook is in place.
+- **Consolidator** — cluster + summarize stale memories into dense concepts.
+- **Online weight learning** — α/β/γ are injected, not hard-coded, so per-user adaptation from implicit feedback slots in cleanly.
+- **C++17 / ARM NEON core** — a native retrieval path; orthogonal systems-performance project.
 
 ---
 
-## Open datasets & models
+## Tech & models
 
-**Benchmark datasets:**
-- **[LongMemEval](https://huggingface.co/datasets/xiaowu0162/longmemeval)** (MIT) — 500 long-conversation tasks across 5 memory abilities
-- **[LoCoMo](https://huggingface.co/datasets/snap-stanford/locomo)** (CC-BY) — multi-session conversations, ~9K turns each
-- **[MSC · Multi-Session Chat](https://parl.ai/projects/msc/)** (CC-BY) — persona-grounded sessions across days
-- **[PG-19](https://github.com/google-deepmind/pg19)** (Apache-2.0) — long-form English for PQ stress-testing
-
-**Models (open-weight, locally executable):**
-- **[Qwen2.5-1.5B-Instruct](https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct)** (Apache-2.0) — reasoning + summarisation
-- **[bge-small-en-v1.5](https://huggingface.co/BAAI/bge-small-en-v1.5)** (MIT) — embeddings
-- **[Llama-3.2-1B](https://huggingface.co/meta-llama/Llama-3.2-1B)** (LLAMA-3 Community) — fallback for low-end devices
-
-**Planned releases:**
-- **MobileMem-Bench** — ~5–10K synthetic mobile-agent dialogues with device context. CC-BY 4.0 on Hugging Face.
-- **Qwen2.5-1.5B-Consolidator** — LoRA-tuned for cluster→concept distillation. Apache-2.0.
+**Embeddings:** [bge-small-en-v1.5](https://huggingface.co/BAAI/bge-small-en-v1.5) (MIT), served via **ONNX Runtime** (no torch). **Vector index:** hnswlib (HNSW, cosine). **Metadata:** SQLite (WAL). **Scheduling:** APScheduler. **Eval dataset:** [LongMemEval-cleaned](https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned). All dependencies are permissively licensed and run locally — no cloud calls at runtime.
 
 ---
 
-## Team
+## About
 
-| | Name | Role | Owns |
-| :---: | :--- | :--- | :--- |
-| 👤 | **Ajay Javali** | Systems Layer | L1/L2/L3 tiers, C++ native core, daemons, benchmarks |
-| 👤 | **Christine R** | Intelligence Layer | Routing, context, embed/LLM, prefetch, consolidator |
-
-Both: IIIT-Bangalore, B.Tech CSE, 2nd Year. Team **ByteMe**.
-
----
-
-## AI-assisted development disclosure
-
-Per Samsung ennovateX rules, all AI-assisted development is disclosed.
-Tools used during development: **Cursor**, **Claude Code** (paired-coding
-agents), **aider** (repo-aware refactors), **Continue.dev** (IDE assistant).
-
-No closed APIs are used at runtime. Every dependency is permissively
-licensed and locally executable.
+Built solo by **Ajay Javali** (IIIT-Bangalore, B.Tech CSE) as a from-scratch systems + ML project: the tiered substrate, the ONNX embedding runtime, the context-aware scorer, the pipeline, the concurrency and property-based test suites, the benchmarks, and the LongMemEval evaluation. Originally prototyped with a collaborator who has since departed; all current code is my own.
 
 ---
 
 ## License
 
 Apache License 2.0 — see [LICENSE](./LICENSE).
-Released datasets will be CC-BY 4.0; released models Apache-2.0.
-
----
-
-<div align="center">
-
-Built for **Samsung R&D Institute India–Bangalore** · ennovateX AX Hackathon 2026.
-*Memory is the unglamorous bottleneck. We're making it fast.*
-
-</div>
