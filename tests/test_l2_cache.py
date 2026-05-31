@@ -333,3 +333,148 @@ class TestPersistence:
         # _next_label should be at least 3 now
         assert c2._next_label >= 3
         c2.close()
+
+    class TestPersistedCapacity:
+        """Regression: a grown index must survive close/reopen.
+
+        Bug (found by a scale test on LongMemEval): when L2 grew its HNSW index
+        past the constructor's max_elements via resize_index(), that grown
+        capacity was lost on reload — load_index() reopened with the stale
+        constructor default, so the next insert computed a new max below the
+        live element count and hnswlib refused to resize:
+            RuntimeError: Cannot resize, max element is less than the current
+            number of elements
+
+        Fix: on load, adopt max(requested, persisted capacity, live count);
+        in resize, floor the grow base at the actual physical count. These
+        tests pin both halves. Small max_elements keeps it fast — same code
+        path as the 10K-scale crash, milliseconds to run.
+        """
+
+    def test_grown_capacity_survives_reload(self, tmp_path, rng):
+        data_dir = tmp_path / "l2_persist"
+
+        # Fill past max_elements=64 to force at least one grow.
+        cache = L2HotVectorCache(
+            data_dir=data_dir,
+            capacity_bytes=64 * 1024 * 1024,  # big budget → no eviction, pure grow
+            max_elements=64,
+            dim=384,
+        )
+        for i in range(80):
+            cache.insert(_make_memory(text=f"t{i}", mid=f"m{i}"), _rand_vec(rng))
+        grown_max = cache._max_elements
+        assert grown_max > 64, "index should have grown past the initial cap"
+        live = cache._index.get_current_count()
+        cache.close()
+
+        # Reopen with the ORIGINAL (stale) max_elements — the trap.
+        reopened = L2HotVectorCache(
+            data_dir=data_dir,
+            capacity_bytes=64 * 1024 * 1024,
+            max_elements=64,  # deliberately the stale small value
+            dim=384,
+        )
+        # Edit 1: effective capacity must reflect the persisted/live size,
+        # never the stale constructor default.
+        assert reopened._max_elements >= live
+        reopened.close()
+
+    def test_insert_after_reload_does_not_crash(self, tmp_path, rng):
+        """The exact crash scenario: fill, grow, close, reopen, insert again."""
+        data_dir = tmp_path / "l2_persist2"
+
+        cache = L2HotVectorCache(
+            data_dir=data_dir,
+            capacity_bytes=64 * 1024 * 1024,
+            max_elements=64,
+            dim=384,
+        )
+        for i in range(80):
+            cache.insert(_make_memory(text=f"t{i}", mid=f"m{i}"), _rand_vec(rng))
+        cache.close()
+
+        reopened = L2HotVectorCache(
+            data_dir=data_dir,
+            capacity_bytes=64 * 1024 * 1024,
+            max_elements=64,
+            dim=384,
+        )
+        # This insert used to raise RuntimeError("Cannot resize ...").
+        for i in range(80, 100):
+            reopened.insert(_make_memory(text=f"t{i}", mid=f"m{i}"), _rand_vec(rng))
+        assert reopened._index.get_current_count() >= 100
+        reopened.close()
+
+
+class TestPersistedCapacity:
+    """Regression: a grown index must survive close/reopen.
+
+    Bug (found by a scale test on LongMemEval): when L2 grew its HNSW index
+    past the constructor's max_elements via resize_index(), that grown
+    capacity was lost on reload — load_index() reopened with the stale
+    constructor default, so the next insert computed a new max below the
+    live element count and hnswlib refused to resize:
+        RuntimeError: Cannot resize, max element is less than the current
+        number of elements
+
+    Fix: on load, adopt max(requested, persisted capacity, live count);
+    in resize, floor the grow base at the actual physical count. These
+    tests pin both halves. Small max_elements keeps it fast — same code
+    path as the 10K-scale crash, milliseconds to run.
+    """
+
+    def test_grown_capacity_survives_reload(self, tmp_path, rng):
+        data_dir = tmp_path / "l2_persist"
+
+        # Fill past max_elements=64 to force at least one grow.
+        cache = L2HotVectorCache(
+            data_dir=data_dir,
+            capacity_bytes=64 * 1024 * 1024,  # big budget → no eviction, pure grow
+            max_elements=64,
+            dim=384,
+        )
+        for i in range(80):
+            cache.insert(_make_memory(text=f"t{i}", mid=f"m{i}"), _rand_vec(rng))
+        grown_max = cache._max_elements
+        assert grown_max > 64, "index should have grown past the initial cap"
+        live = cache._index.get_current_count()
+        cache.close()
+
+        # Reopen with the ORIGINAL (stale) max_elements — the trap.
+        reopened = L2HotVectorCache(
+            data_dir=data_dir,
+            capacity_bytes=64 * 1024 * 1024,
+            max_elements=64,  # deliberately the stale small value
+            dim=384,
+        )
+        # Edit 1: effective capacity must reflect the persisted/live size,
+        # never the stale constructor default.
+        assert reopened._max_elements >= live
+        reopened.close()
+
+    def test_insert_after_reload_does_not_crash(self, tmp_path, rng):
+        """The exact crash scenario: fill, grow, close, reopen, insert again."""
+        data_dir = tmp_path / "l2_persist2"
+
+        cache = L2HotVectorCache(
+            data_dir=data_dir,
+            capacity_bytes=64 * 1024 * 1024,
+            max_elements=64,
+            dim=384,
+        )
+        for i in range(80):
+            cache.insert(_make_memory(text=f"t{i}", mid=f"m{i}"), _rand_vec(rng))
+        cache.close()
+
+        reopened = L2HotVectorCache(
+            data_dir=data_dir,
+            capacity_bytes=64 * 1024 * 1024,
+            max_elements=64,
+            dim=384,
+        )
+        # This insert used to raise RuntimeError("Cannot resize ...").
+        for i in range(80, 100):
+            reopened.insert(_make_memory(text=f"t{i}", mid=f"m{i}"), _rand_vec(rng))
+        assert reopened._index.get_current_count() >= 100
+        reopened.close()

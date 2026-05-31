@@ -138,8 +138,27 @@ class L2HotVectorCache:
         self._index = hnswlib.Index(space="cosine", dim=dim)
         index_path = self._data_dir / "hnsw.bin"
         if index_path.exists():
+            # First load to discover the index's ACTUAL persisted capacity and
+            # live count — a previous run may have grown it past the requested
+            # max_elements via resize_index(), and that grown capacity must
+            # survive the reload. Loading with too small a cap would leave
+            # self._max_elements stale and make the next resize compute a new
+            # max below the real element count (hnswlib then refuses to
+            # resize). So adopt the largest of: requested, persisted, live.
             self._index.load_index(str(index_path), max_elements=max_elements)
-            logger.info(f"L2 loaded existing index from {index_path}")
+            effective_max = max(
+                max_elements,
+                self._index.get_max_elements(),
+                self._index.get_current_count(),
+            )
+            if effective_max > self._index.get_max_elements():
+                self._index.resize_index(effective_max)
+            self._max_elements = effective_max
+            logger.info(
+                f"L2 loaded existing index from {index_path} "
+                f"(capacity={effective_max}, "
+                f"count={self._index.get_current_count()})"
+            )
         else:
             self._index.init_index(
                 max_elements=max_elements,
@@ -354,8 +373,13 @@ class L2HotVectorCache:
         # raise even if logically we have room.
         physical_count = self._index.get_current_count()
         if physical_count >= self._max_elements:
-            # Grow by 50% headroom, minimum +16 slots
-            new_max = max(self._max_elements * 3 // 2, self._max_elements + 16)
+            # Grow by 50% headroom, minimum +16 slots. Floor at the ACTUAL
+            # physical count so a stale self._max_elements can never make us
+            # compute a new max below what the index already holds (which
+            # hnswlib rejects). Defensive: Edit 1 keeps _max_elements honest,
+            # this guarantees correctness even if it somehow isn't.
+            grow_base = max(self._max_elements, physical_count)
+            new_max = max(grow_base * 3 // 2, grow_base + 16)
             try:
                 self._index.resize_index(new_max)
                 self._max_elements = new_max
