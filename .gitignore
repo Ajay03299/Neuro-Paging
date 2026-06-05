@@ -97,3 +97,5 @@ demo-memory/
 
 # Runtime data dirs (MemoryManager default + demos)
 .neuro-paging/
+.dashboard-memory/
+.probe/
