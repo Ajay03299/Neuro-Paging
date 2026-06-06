@@ -4,31 +4,31 @@ A thin Streamlit view over the MemoryAgent pipeline. Two tabs:
 
   1. Query Playground - type a query, watch memories rank across tiers with
      a per-hit breakdown of the three scoring terms (semantic / context /
-     frequency). The "context-aware" thesis becomes visible here: two
-     memories with identical text rank differently because of context.
+     frequency). Two memories with identical text rank differently by context.
 
-  2. Tier Visualizer - how many memories live in L1 / L2 / L3, with budgets
-     and utilization, so the cache hierarchy is concrete.
+  2. Tier Visualizer - L1 / L2 / L3 occupancy, budgets, and utilization.
 
 Run:  streamlit run ui/dashboard.py
 
-The dashboard adds NO business logic - it only calls agent.remember() and
-agent.recall(). All ranking, embedding, and tiering is the real system.
+The dashboard adds NO business logic - it only calls agent.remember() /
+agent.recall() / get_stats(). All ranking, embedding, tiering is the system.
 """
 
 from __future__ import annotations
+
+import random
 
 import streamlit as st
 
 from neuro_paging.context import ContextTags, TimeBucket
 from neuro_paging.embed import BGESmallEmbedder
+from neuro_paging.memory.types import Tier
 from neuro_paging.pipeline import MemoryAgent
 from neuro_paging.routing import ContextAwareScorer
 
 st.set_page_config(page_title="Neuro-Paging", page_icon="🧠", layout="wide")
 
 
-# Seed data: a story that shows off semantic + context ranking
 # (text, time_bucket, foreground_app, semantic_tags)
 _SEED = [
     (
@@ -80,6 +80,53 @@ _SEED = [
 ]
 
 
+def _bulk_seed_specs() -> list[tuple[str, TimeBucket, str, tuple[str, ...]]]:
+    """Varied, realistic memories so tiers fill like a real user's store.
+    Deterministic (seeded) so the demo is reproducible."""
+    rng = random.Random(42)
+    apps = ["VSCode", "Notes", "Calendar", "Slack", "Mail", "Chrome", "Terminal"]
+    buckets = list(TimeBucket)
+    lines = [
+        "User prefers tabs over spaces in code",
+        "User prefers dark mode in every app",
+        "The auth service runs on port 8080 behind nginx",
+        "The billing service is an AWS Lambda triggered nightly",
+        "Search is backed by Elasticsearch with a 7-day retention",
+        "The cache layer uses Redis with a 60-second TTL",
+        "Weekly design sync is Tuesday at 2pm with the product team",
+        "Priya owns the API migration; ping her before schema changes",
+        "User is allergic to shellfish - flag it on restaurant bookings",
+        "Back up the database before every production deploy",
+        "The staging server lives in us-east-1, prod in eu-west-1",
+        "User's manager is Devin; 1:1s are Thursday mornings",
+        "The mobile app ships every other Wednesday",
+        "Renew the TLS certificate before it expires on the 28th",
+        "User takes the 8:15 train and works from home on Fridays",
+        "The analytics pipeline is Kafka into Snowflake",
+        "Feature flags are managed in LaunchDarkly, not in code",
+        "User prefers async standups in Slack over live calls",
+        "The design system tokens live in the shared Figma file",
+        "Incident retros happen the Monday after any Sev-1",
+        "User is vegetarian and avoids dairy when possible",
+        "The data team owns the dbt models; don't edit them directly",
+        "Quarterly planning is the last week of every quarter",
+        "User's preferred IDE theme is Solarized Dark",
+        "The load balancer health-check path is /healthz",
+        "Onboarding docs are in the Notion workspace under People Ops",
+        "User commutes by bike when the weather is above 15 degrees",
+        "The recommender model retrains every Sunday at midnight",
+        "Customer escalations route to the on-call via PagerDuty",
+        "User prefers window seats, aisle only for red-eyes",
+    ]
+    specs: list[tuple[str, TimeBucket, str, tuple[str, ...]]] = []
+    for i in range(140):
+        text = lines[i % len(lines)]
+        if i >= len(lines):
+            text = f"{text} (note {i // len(lines)})"
+        specs.append((text, rng.choice(buckets), rng.choice(apps), ()))
+    return specs
+
+
 @st.cache_resource(show_spinner=False)
 def get_agent() -> MemoryAgent:
     """Build the agent once per session (model load is ~once) and seed it."""
@@ -87,9 +134,27 @@ def get_agent() -> MemoryAgent:
     scorer = ContextAwareScorer(embedder=embedder)
     agent = MemoryAgent(data_dir="./.dashboard-memory", embedder=embedder, scorer=scorer)
     if agent.get_stats().total_count == 0:
+        # Story memories first (the identical-text pair powers the demo).
         for text, tb, app, tags in _SEED:
             ctx = ContextTags.now(time_bucket=tb, foreground_app=app, semantic_tags=tags)
             agent.remember(text, ctx)
+
+        # Bulk fill so tiers cascade: L1 fills (~91), overflow -> L2.
+        bulk_ids = []
+        for text, tb, app, tags in _bulk_seed_specs():
+            ctx = ContextTags.now(time_bucket=tb, foreground_app=app, semantic_tags=tags)
+            bulk_ids.append(agent.remember(text, ctx))
+
+        # Seed L3 honestly: demote ~18 L2 memories down to L3, via the same
+        # demote() the pruner uses. Now all three tiers show non-zero.
+        demoted = 0
+        for mid in bulk_ids:
+            if demoted >= 18:
+                break
+            mem = agent.manager.get(mid)
+            if mem is not None and mem.tier == Tier.L2:
+                agent.manager.demote(mid)
+                demoted += 1
     return agent
 
 
@@ -115,7 +180,7 @@ st.caption(
     "**semantic similarity x situational context x recency** - not keyword match."
 )
 
-with st.spinner("Loading bge-small embedder (first run downloads ~90 MB)..."):
+with st.spinner("Loading bge-small + seeding ~150 demo memories (first run)..."):
     agent = get_agent()
 
 tab_query, tab_tiers = st.tabs(["🔍 Query Playground", "📊 Tier Visualizer"])
@@ -177,7 +242,7 @@ with tab_query:
 
         st.info(
             "Try this: keep the query 'deployment pipeline', set app=VSCode, "
-            "time=morning -> note the top hit's score. Now switch to app=Netflix, "
+            "time=morning -> note the top hit. Now switch to app=Netflix, "
             "time=night. Two seeded memories have identical text - watch the "
             "context term collapse and the ranking change. Flat RAG would tie them."
         )
@@ -231,8 +296,8 @@ with tab_tiers:
     st.divider()
     st.markdown(
         f"**Total: {stats.total_count} memories.** New memories enter L1 and "
-        "cascade L1->L2->L3 as byte budgets fill. A power-gated background pruner "
-        "demotes cold L2 memories to L3."
+        "cascade L1->L2->L3 as byte budgets fill. A power-gated background "
+        "pruner demotes cold L2 memories to L3."
     )
 
     st.subheader("Add a memory")
