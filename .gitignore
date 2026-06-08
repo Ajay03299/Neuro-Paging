@@ -99,3 +99,6 @@ demo-memory/
 .neuro-paging/
 .dashboard-memory/
 .probe/
+
+# C++ native core build artifacts (regenerable)
+npaged-core/build/
