@@ -27,6 +27,44 @@ timestamped JSON to `bench/results/` and a human-readable report to
 
 ---
 
+## Native NEON kernel — hand-written SIMD vs Accelerate BLAS
+
+A C++17 batched cosine-similarity kernel (`npaged-core/`), hand-vectorized
+with ARM NEON intrinsics and multi-threaded, exposed to Python via pybind11.
+Because the embeddings are L2-normalized, cosine similarity reduces to a dot
+product — branch-free multiply-accumulate, the ideal SIMD workload.
+
+`bench/native_kernel.py` · full report: [`notes/native_kernel.md`](./notes/native_kernel.md)
+
+| N candidates | NumPy (BLAS) | NEON kernel (auto) | Ratio |
+| ---: | ---: | ---: | ---: |
+| 1,000 | 8 µs | 51 µs | 0.16× (single-threaded by design) |
+| 10,000 | 64 µs | 168 µs | 0.38× |
+| **50,000** | 761 µs | **655 µs** | **1.16× — beats BLAS** |
+
+> At 50K candidates the specialized kernel **outperforms Apple's Accelerate
+> BLAS by 16%** — specialization (fixed dim, batched dot product, hand-tuned
+> threading) beats general GEMV at scale. BLAS wins at small N, where its
+> low-overhead path dominates; the kernel auto-falls-back to single-threaded
+> below ~10K candidates, where measured thread-launch overhead is a net loss.
+
+Two empirically-derived tuning decisions (from a 1–11 thread sweep, median
+of 50 runs):
+
+- **Default 5 threads, not `hardware_concurrency()` (11).** The M3 Pro has
+  5 performance + 6 efficiency cores; the speedup peaks at exactly 5
+  threads (3.67× over single-threaded) and *degrades* past it, as chunks
+  assigned to efficiency cores become stragglers that gate completion.
+- **Parallel threshold at 8192 candidates.** Below ~10K, thread-launch
+  overhead exceeds the parallel win; the kernel runs single-threaded.
+
+Correctness: all variants (scalar, single-threaded NEON+FMA, multi-threaded)
+verified against NumPy — `allclose`, max difference ~6e-8 (float32 rounding
+from summation order).
+
+---
+
+
 ## L1 — working context (in-memory FIFO + byte budget)
 
 `bench/l1_baseline.py` · full report: [`notes/l1_baseline.md`](./notes/l1_baseline.md)
