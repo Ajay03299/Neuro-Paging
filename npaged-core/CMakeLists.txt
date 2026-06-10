@@ -6,7 +6,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(Python COMPONENTS Interpreter Development.Module REQUIRED)
 find_package(pybind11 CONFIG REQUIRED)
+find_package(Threads REQUIRED)
 
 pybind11_add_module(npaged_core kernel.cpp)
-
 target_compile_options(npaged_core PRIVATE -O3)
+target_link_libraries(npaged_core PRIVATE Threads::Threads)
