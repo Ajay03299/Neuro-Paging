@@ -36,7 +36,8 @@ Everything below is **measured on Apple Silicon M3 Pro** and reproducible.
 | **Retrieval quality** | **recall@5 = 0.98** on LongMemEval-S (all 5 ability types, ~48 sessions/q, on-device) | [eval/README.md](./eval/README.md) |
 | **L1 insert latency** | **1.42 µs** p99 @ 32 KB (704× under the 1 ms target) | [BENCHMARKS.md](./BENCHMARKS.md) |
 | **L2 query latency** | **0.78 ms** p50 @ 10K vectors (6.4× under 5 ms) | [BENCHMARKS.md](./BENCHMARKS.md) |
-| **Test suite** | **212 tests** — example, concurrency (100 threads), property-based | [#testing](#testing) |
+| **Test suite** | **216 tests** — example, concurrency (100 threads), property-based | [#testing](#testing) |
+| **Native SIMD kernel** | Hand-written NEON beats **Accelerate BLAS by 1.16×** @ 50K candidates | [BENCHMARKS.md](./BENCHMARKS.md) |
 
 ---
 
@@ -60,7 +61,7 @@ A complete, working, on-device memory system — store a fact, ask anything, get
 | Predictive prefetch (FP-Growth) | 🔭 future | designed; `promote()` hook exists |
 | Consolidator (cluster → concept summary) | 🔭 future | — |
 | Online α/β/γ weight learning | 🔭 future | weights are injected, so this slots in cleanly |
-| C++17 / ARM NEON retrieval core | 🔭 future | Python today; orthogonal systems-perf project |
+| **C++17 / ARM NEON kernel** (pybind11) | ✅ | beats Accelerate BLAS 1.16× @ 50K; thread sweep peaks at P-core count |
 
 ✅ = shipped & tested · 🔭 = future work (see [Future work](#future-work))
 
@@ -196,6 +197,7 @@ Neuro-Paging/
 │   ├── pipeline/     # MemoryAgent (remember/recall/respond) ✅
 │   ├── daemons/      # power-gated pruner                  ✅
 │   └── context/      # context tags + sensor types         ✅
+├── npaged-core/      # C++17 NEON SIMD kernel (pybind11)    ✅
 ├── bench/            # latency / throughput benchmarks      ✅
 ├── eval/             # LongMemEval recall@k harness         ✅
 ├── tests/            # 212 tests (example/concurrency/property)
@@ -213,7 +215,6 @@ Documented, not built — the architecture leaves clean seams for each:
 - **Predictive prefetch** — FP-Growth over `(time, app, topic)` routines to warm L1 before a query; the `promote()` hook is in place.
 - **Consolidator** — cluster + summarize stale memories into dense concepts.
 - **Online weight learning** — α/β/γ are injected, not hard-coded, so per-user adaptation from implicit feedback slots in cleanly.
-- **C++17 / ARM NEON core** — a native retrieval path; orthogonal systems-performance project.
 
 ---
 
