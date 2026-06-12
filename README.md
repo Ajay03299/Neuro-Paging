@@ -8,9 +8,15 @@
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-212_passing-brightgreen.svg)](#testing)
+[![Tests](https://img.shields.io/badge/tests-216_passing-brightgreen.svg)](#testing)
 [![CI](https://github.com/Ajay03299/Neuro-Paging/actions/workflows/ci.yml/badge.svg)](https://github.com/Ajay03299/Neuro-Paging/actions/workflows/ci.yml)
 
+<br>
+
+<img src="docs/demo.gif" alt="Neuro-Paging live demo: two memories with identical text rank differently as context changes" width="820">
+
+<em>Same text, different rank — the context term re-orders identical memories as the situation changes. Flat RAG would tie them.</em>
+ s
 </div>
 
 ---
@@ -157,14 +163,14 @@ agent.close()
 
 ## Testing
 
-**212 tests**, all passing, CI-enforced across Python 3.11 and 3.12, in three styles:
+**216 tests**, all passing, CI-enforced across Python 3.11 and 3.12, in three styles:
 
 - **Example-based** — correctness on known scenarios across every component.
 - **Concurrency stress** (9 tests) — hammer L1/L2/L3 and the pruner from up to **100 threads**, verifying dual-store atomicity (HNSW + SQLite never diverge), race-free label assignment, and byte-budget invariants under contention. A global `pytest-timeout` (thread method) makes any deadlock regression fail fast with a thread dump instead of wedging CI.
 - **Property-based** (Hypothesis) — encode invariants like *"the byte budget is never exceeded for any insert sequence"* and let Hypothesis generate hundreds of cases trying to break them, shrinking any failure to a minimal reproducer.
 
 ```bash
-pytest tests/ -q                       # all 212
+pytest tests/ -q                       # all 216
 pytest tests/test_concurrency.py -v    # the 9 stress tests
 pytest tests/test_properties.py -v     # Hypothesis property tests
 ```
@@ -200,7 +206,7 @@ Neuro-Paging/
 ├── npaged-core/      # C++17 NEON SIMD kernel (pybind11)    ✅
 ├── bench/            # latency / throughput benchmarks      ✅
 ├── eval/             # LongMemEval recall@k harness         ✅
-├── tests/            # 212 tests (example/concurrency/property)
+├── tests/            # 216 tests (example/concurrency/property)
 ├── notes/            # baselines, design decisions
 └── BENCHMARKS.md     # consolidated measured results
 

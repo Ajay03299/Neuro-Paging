@@ -102,3 +102,4 @@ demo-memory/
 
 # C++ native core build artifacts (regenerable)
 npaged-core/build/
+*.mov
